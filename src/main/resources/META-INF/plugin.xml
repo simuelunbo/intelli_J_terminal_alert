@@ -1,0 +1,60 @@
+<idea-plugin>
+    <id>com.terminalwatcher.android-studio-terminal-alert</id>
+    <name>Terminal AI Watcher</name>
+    <vendor>simuelunbo</vendor>
+
+    <description><![CDATA[
+        Monitors Android Studio's built-in terminal for AI CLI tool events
+        (Claude Code, Codex, Gemini CLI) and sends IDE notifications with system sounds.
+    ]]></description>
+
+    <change-notes><![CDATA[
+        <h2>1.0.2</h2>
+        <ul>
+            <li><b>New:</b> IntelliJ IDEA support — works alongside Android Studio simultaneously</li>
+            <li><b>New:</b> Dynamic port allocation — no more port conflicts when running multiple IDEs</li>
+            <li><b>New:</b> Hook events broadcast to all running IDE instances</li>
+            <li><b>Fix:</b> Stale port file cleanup on startup (handles IDE crash/force quit)</li>
+            <li><b>Fix:</b> Race condition resolved — server fully ready before hook registration</li>
+            <li><b>Fix:</b> Codex notify hook format corrected for reliable delivery</li>
+            <li><b>Fix:</b> Filtered out idle_prompt / auth_success noise notifications</li>
+            <li><b>Fix:</b> Global + project-level dual hook registration for all projects</li>
+            <li><b>Improve:</b> Dock badge counter auto-resets when IDE gains focus</li>
+            <li><b>Improve:</b> macOS notification uses Android Studio icon</li>
+            <li><b>Improve:</b> Migrated to SimplePersistentStateComponent (future-proof settings)</li>
+            <li><b>Improve:</b> Removed internal API reflection — uses official ContentManager API only</li>
+        </ul>
+        <h2>1.0.0</h2>
+        <ul>
+            <li>AI CLI Hook-based event detection (zero false positives)</li>
+            <li>Claude Code: Notification + Stop hooks for permission prompts and task completion</li>
+            <li>Codex: notify hook for task completion (agent-turn-complete)</li>
+            <li>Gemini CLI: Notification + AfterAgent hooks for permission prompts and task completion</li>
+            <li>Built-in HTTP server (localhost:19876) receives hook events</li>
+            <li>Auto-configures hook settings for each CLI tool on first run</li>
+            <li>IntelliJ balloon notifications with sound alerts (afplay)</li>
+            <li>Per-tool enable/disable in Settings > Tools > Terminal AI Watcher</li>
+        </ul>
+    ]]></change-notes>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>org.jetbrains.plugins.terminal</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <notificationGroup id="Terminal AI Watcher"
+                            displayType="BALLOON"/>
+        <applicationService
+            serviceImplementation="com.terminalwatcher.settings.SettingsState"/>
+        <applicationService
+            serviceImplementation="com.terminalwatcher.hook.HookHttpServer"/>
+        <applicationService
+            serviceImplementation="com.terminalwatcher.mac.MacNotifier"/>
+        <projectConfigurable
+            parentId="tools"
+            instance="com.terminalwatcher.settings.SettingsConfigurable"
+            id="com.terminalwatcher.settings"
+            displayName="Terminal AI Watcher"/>
+        <postStartupActivity
+            implementation="com.terminalwatcher.TerminalWatcherPlugin"/>
+    </extensions>
+</idea-plugin>

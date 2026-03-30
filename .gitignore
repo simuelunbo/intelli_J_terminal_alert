@@ -1,0 +1,27 @@
+# IntelliJ Platform Plugin
+.idea/
+.intellijPlatform/
+*.iml
+
+# Gradle
+.gradle/
+build/
+gradle/wrapper/gradle-wrapper.jar
+
+# Kotlin
+.kotlin/
+
+# macOS
+.DS_Store
+
+# Claude Code
+.claude/
+
+# Gemini CLI
+.gemini/
+
+# Serena
+.serena/
+
+# Blog draft
+blog_draft.md
