@@ -11,18 +11,19 @@
     <change-notes><![CDATA[
         <h2>1.0.2</h2>
         <ul>
-            <li><b>New:</b> IntelliJ IDEA support — works alongside Android Studio simultaneously</li>
-            <li><b>New:</b> Dynamic port allocation — no more port conflicts when running multiple IDEs</li>
-            <li><b>New:</b> Hook events broadcast to all running IDE instances</li>
-            <li><b>Fix:</b> Stale port file cleanup on startup (handles IDE crash/force quit)</li>
+            <li><b>New:</b> macOS native notifications via SystemNotifications API — IDE icon displayed, click activates IDE</li>
+            <li><b>New:</b> IDE-only notifications — external terminals ignored (JetBrains-JediTerm filter)</li>
+            <li><b>New:</b> PPID chain routing — notifications go only to the originating IDE instance</li>
+            <li><b>New:</b> IntelliJ IDEA compatibility (build 261+) — works alongside Android Studio</li>
+            <li><b>New:</b> Dynamic port allocation — multiple IDEs run simultaneously without conflicts</li>
+            <li><b>New:</b> Codex tui.notifications for approval-requested alerts (terminal bell)</li>
+            <li><b>Fix:</b> Stale port file cleanup on startup (handles crash/force quit)</li>
             <li><b>Fix:</b> Race condition resolved — server fully ready before hook registration</li>
-            <li><b>Fix:</b> Codex notify hook format corrected for reliable delivery</li>
             <li><b>Fix:</b> Filtered out idle_prompt / auth_success noise notifications</li>
-            <li><b>Fix:</b> Global + project-level dual hook registration for all projects</li>
             <li><b>Improve:</b> Dock badge counter auto-resets when IDE gains focus</li>
-            <li><b>Improve:</b> macOS notification uses Android Studio icon</li>
             <li><b>Improve:</b> Migrated to SimplePersistentStateComponent (future-proof settings)</li>
-            <li><b>Improve:</b> Removed internal API reflection — uses official ContentManager API only</li>
+            <li><b>Improve:</b> Removed all reflection — uses official ContentManager API only</li>
+            <li><b>Improve:</b> Removed osascript dependency — all notifications via IDE internal APIs</li>
         </ul>
         <h2>1.0.0</h2>
         <ul>

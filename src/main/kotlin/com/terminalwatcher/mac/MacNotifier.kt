@@ -4,6 +4,7 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.ui.SystemNotifications
 import com.terminalwatcher.hook.SoundType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -27,7 +28,7 @@ class MacNotifier(private val scope: CoroutineScope) {
         if (isGloballyThrottled()) return
         if (isThrottled(message)) return
 
-        // IDE BALLOON
+        // 1. IDE 내부 BALLOON 알림 (Timeline)
         try {
             NotificationGroupManager.getInstance()
                 .getNotificationGroup(NOTIFICATION_GROUP_ID)
@@ -37,12 +38,18 @@ class MacNotifier(private val scope: CoroutineScope) {
             log.warn("[TWatcher] Failed to send IDE notification", e)
         }
 
-        // macOS 알림 센터 (Android Studio 아이콘)
-        scope.launch(Dispatchers.IO) {
-            sendMacSystemNotification(toolName, subtitle, message)
+        // 2. macOS 네이티브 알림 (SystemNotifications — IDE 아이콘 + 클릭 시 IDE 활성화)
+        try {
+            SystemNotifications.getInstance().notify(
+                SYSTEM_NOTIFICATION_NAME,
+                "$toolName — $subtitle",
+                message,
+            )
+        } catch (e: Exception) {
+            log.warn("[TWatcher] Failed to send system notification", e)
         }
 
-        // Dock 뱃지 증가
+        // 3. Dock 뱃지 증가
         incrementBadge()
     }
 
@@ -82,27 +89,6 @@ class MacNotifier(private val scope: CoroutineScope) {
         }
     }
 
-    private fun sendMacSystemNotification(toolName: String, subtitle: String, message: String) {
-        try {
-            val escapedTitle = toolName.replace("\"", "\\\"")
-            val escapedSubtitle = subtitle.replace("\"", "\\\"")
-            val escapedMessage = message.replace("\"", "\\\"")
-
-            val script = """
-                tell application "Android Studio"
-                    display notification "$escapedMessage" with title "$escapedTitle" subtitle "$escapedSubtitle" sound name "$DEFAULT_SOUND"
-                end tell
-            """.trimIndent()
-
-            ProcessBuilder("osascript", "-e", script)
-                .redirectErrorStream(true)
-                .start()
-                .waitFor()
-        } catch (e: Exception) {
-            log.warn("[TWatcher] Failed to send macOS notification", e)
-        }
-    }
-
     private fun isGloballyThrottled(): Boolean {
         val now = System.currentTimeMillis()
         if (now - lastGlobalNotificationTime < GLOBAL_THROTTLE_MS) return true
@@ -119,8 +105,8 @@ class MacNotifier(private val scope: CoroutineScope) {
     companion object {
         private const val THROTTLE_WINDOW_MS = 2000L
         private const val GLOBAL_THROTTLE_MS = 5000L
-        private const val DEFAULT_SOUND = "Glass"
         private const val NOTIFICATION_GROUP_ID = "Terminal AI Watcher"
+        private const val SYSTEM_NOTIFICATION_NAME = "terminal-ai-watcher"
         private val lastNotificationTimes = ConcurrentHashMap<String, Long>()
 
         @Volatile

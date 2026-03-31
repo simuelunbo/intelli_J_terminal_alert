@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+  <!-- Background: rounded rectangle with gradient -->
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6C5CE7"/>
+      <stop offset="100%" style="stop-color:#4834D4"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="36" height="36" rx="8" fill="url(#bg)"/>
+
+  <!-- Terminal prompt: >_ -->
+  <path d="M10 14 L17 20 L10 26" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <line x1="19" y1="26" x2="27" y2="26" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+
+  <!-- Notification bell (top-right) -->
+  <g transform="translate(28, 8)">
+    <path d="M0 5 C0 2 2 0 4 0 C6 0 8 2 8 5 L8 7 L9 8 L-1 8 L0 7 Z" fill="#FFEAA7" stroke="none"/>
+    <circle cx="4" cy="9.5" r="1.5" fill="#FFEAA7"/>
+  </g>
+
+  <!-- Notification dot (red) -->
+  <circle cx="34" cy="6" r="3" fill="#FF6B6B"/>
+</svg>
