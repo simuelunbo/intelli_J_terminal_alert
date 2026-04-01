@@ -190,7 +190,11 @@ object HookConfigHelper {
 
         try {
             val scriptFile = File(codexDir, "notify-twatcher.sh")
-            if (!scriptFile.exists() || !scriptFile.readText().contains("terminal-watcher")) {
+            val scriptContent = if (scriptFile.exists()) scriptFile.readText() else ""
+            val hasCorrectScript = scriptContent.contains("terminal-watcher") &&
+                scriptContent.contains("JetBrains-JediTerm")
+
+            if (!hasCorrectScript) {
                 scriptFile.writeText(
                     """
                     |#!/bin/bash
@@ -214,31 +218,35 @@ object HookConfigHelper {
 
             val configFile = File(codexDir, "config.toml")
             val content = if (configFile.exists()) configFile.readText() else ""
-
-            if (content.contains("notify-twatcher.sh")) {
-                log.info("[TWatcher] Codex notify hook already configured")
-                return
-            }
+            var modified = false
 
             var cleanedContent = content
-                .replace(Regex("""# Added by Terminal AI Watcher plugin\n"""), "")
-                .replace(Regex("""notify\s*=\s*\[.*]\n?"""), "")
-                .replace(Regex("""notify\s*=\s*"[^"]*notify-twatcher[^"]*"\n?"""), "")
-                .trimEnd()
+            if (!content.contains("notify-twatcher.sh")) {
+                cleanedContent = content
+                    .replace(Regex("""# Added by Terminal AI Watcher plugin\n"""), "")
+                    .replace(Regex("""notify\s*=\s*\[.*]\n?"""), "")
+                    .replace(Regex("""notify\s*=\s*"[^"]*notify-twatcher[^"]*"\n?"""), "")
+                    .trimEnd()
 
-            val lines = cleanedContent.lines().toMutableList()
-            lines.add(1, "notify = [\"${scriptFile.absolutePath}\"]")
-
-            // approval-requested 알림: notify hook 미지원이므로 tui.notifications로 bell 알림
-            if (!cleanedContent.contains("[tui]")) {
-                lines.add("")
-                lines.add("[tui]")
-                lines.add("notifications = [\"approval-requested\"]")
-                lines.add("notification_method = \"bel\"")
+                val lines = cleanedContent.lines().toMutableList()
+                lines.add(1, "notify = [\"${scriptFile.absolutePath}\"]")
+                cleanedContent = lines.joinToString("\n")
+                modified = true
             }
 
-            configFile.writeText(lines.joinToString("\n"))
-            log.info("[TWatcher] Codex hooks configured in ${configFile.absolutePath}")
+            if (!cleanedContent.contains("[tui]")) {
+                cleanedContent = cleanedContent.trimEnd() + "\n\n[tui]\n" +
+                    "notifications = [\"approval-requested\"]\n" +
+                    "notification_method = \"bel\"\n"
+                modified = true
+            }
+
+            if (modified) {
+                configFile.writeText(cleanedContent)
+                log.info("[TWatcher] Codex hooks configured in ${configFile.absolutePath}")
+            } else {
+                log.info("[TWatcher] Codex hooks already configured")
+            }
         } catch (e: Exception) {
             log.warn("[TWatcher] Failed to setup Codex hooks", e)
         }
