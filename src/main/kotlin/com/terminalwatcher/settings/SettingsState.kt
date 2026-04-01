@@ -15,11 +15,31 @@ import com.intellij.openapi.components.Storage
 class SettingsState : SimplePersistentStateComponent<SettingsState.SettingsData>(SettingsData()) {
 
     class SettingsData : BaseState() {
-        var enableNotifications by property(true)
+        var enableNotifications by string(null) // 1.0.x 마이그레이션용
+        var enableBadgeCount by property(true)
+        var enableSystemNotification by property(true)
+        var enableIdeBalloon by property(true)
         var enableSound by property(true)
+        var soundName by string("Glass")
+        var customSoundPath by string("")
         var enableClaudeCode by property(true)
         var enableCodex by property(true)
         var enableGeminiCli by property(true)
+    }
+
+    override fun loadState(state: SettingsData) {
+        super.loadState(state)
+        migrateFromV1(state)
+    }
+
+    private fun migrateFromV1(data: SettingsData) {
+        val oldValue = data.enableNotifications ?: return
+        if (oldValue == "false") {
+            data.enableBadgeCount = false
+            data.enableSystemNotification = false
+            data.enableIdeBalloon = false
+        }
+        data.enableNotifications = null
     }
 
     fun isToolEnabled(toolName: String): Boolean = when (toolName) {

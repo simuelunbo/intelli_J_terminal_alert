@@ -9,11 +9,6 @@ enum class HookEventType {
     ERROR,
 }
 
-enum class SoundType(val fileName: String) {
-    ALERT("Glass"),
-    GENTLE("Pop"),
-}
-
 data class HookEvent(
     val tool: String,
     val eventType: HookEventType,

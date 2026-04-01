@@ -5,7 +5,6 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.terminalwatcher.hook.HookEvent
 import com.terminalwatcher.hook.HookEventType
-import com.terminalwatcher.hook.SoundType
 import com.terminalwatcher.mac.MacNotifier
 import com.terminalwatcher.settings.SettingsState
 
@@ -17,7 +16,9 @@ object NotificationDispatcher {
         val settings = SettingsState.getInstance()
         val state = settings.state
 
-        if (!state.enableNotifications) return
+        if (!state.enableBadgeCount && !state.enableSystemNotification &&
+            !state.enableIdeBalloon && !state.enableSound
+        ) return
 
         val toolName = resolveToolName(event.tool)
         if (!settings.isToolEnabled(toolName)) return
@@ -38,14 +39,7 @@ object NotificationDispatcher {
             notificationType = notificationType,
         )
 
-        if (state.enableSound) {
-            val soundType = when (event.eventType) {
-                HookEventType.PERMISSION -> SoundType.ALERT
-                HookEventType.COMPLETE -> SoundType.GENTLE
-                HookEventType.ERROR -> SoundType.ALERT
-            }
-            notifier.playSound(soundType)
-        }
+        notifier.playSound()
     }
 
     private fun resolveToolName(tool: String): String = when (tool) {

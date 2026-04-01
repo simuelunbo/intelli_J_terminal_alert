@@ -5,10 +5,11 @@ import com.intellij.notification.NotificationType
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.ui.SystemNotifications
-import com.terminalwatcher.hook.SoundType
+import com.terminalwatcher.settings.SettingsState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 @Service(Service.Level.APP)
@@ -28,35 +29,51 @@ class MacNotifier(private val scope: CoroutineScope) {
         if (isGloballyThrottled()) return
         if (isThrottled(message)) return
 
-        // 1. IDE 내부 BALLOON 알림 (Timeline)
-        try {
-            NotificationGroupManager.getInstance()
-                .getNotificationGroup(NOTIFICATION_GROUP_ID)
-                .createNotification("$toolName — $subtitle", message, notificationType)
-                .notify(null)
-        } catch (e: Exception) {
-            log.warn("[TWatcher] Failed to send IDE notification", e)
+        val state = SettingsState.getInstance().state
+
+        if (state.enableIdeBalloon) {
+            try {
+                NotificationGroupManager.getInstance()
+                    .getNotificationGroup(NOTIFICATION_GROUP_ID)
+                    .createNotification("$toolName — $subtitle", message, notificationType)
+                    .notify(null)
+            } catch (e: Exception) {
+                log.warn("[TWatcher] Failed to send IDE notification", e)
+            }
         }
 
-        // 2. macOS 네이티브 알림 (SystemNotifications — IDE 아이콘 + 클릭 시 IDE 활성화)
-        try {
-            SystemNotifications.getInstance().notify(
-                SYSTEM_NOTIFICATION_NAME,
-                "$toolName — $subtitle",
-                message,
-            )
-        } catch (e: Exception) {
-            log.warn("[TWatcher] Failed to send system notification", e)
+        if (state.enableSystemNotification) {
+            try {
+                SystemNotifications.getInstance().notify(
+                    SYSTEM_NOTIFICATION_NAME, "$toolName — $subtitle", message,
+                )
+            } catch (e: Exception) {
+                log.warn("[TWatcher] Failed to send system notification", e)
+            }
         }
 
-        // 3. Dock 뱃지 증가
-        incrementBadge()
+        if (state.enableBadgeCount) {
+            incrementBadge()
+        }
     }
 
-    fun playSound(soundType: SoundType) {
+    fun playSound() {
+        val state = SettingsState.getInstance().state
+        if (!state.enableSound) return
+
         scope.launch(Dispatchers.IO) {
             try {
-                ProcessBuilder("afplay", "/System/Library/Sounds/${soundType.fileName}.aiff")
+                val customPath = state.customSoundPath.orEmpty().trim()
+                val soundPath = customPath.ifBlank {
+                    "/System/Library/Sounds/${state.soundName}.aiff"
+                }
+
+                if (!File(soundPath).exists()) {
+                    log.warn("[TWatcher] Sound file not found: $soundPath")
+                    return@launch
+                }
+
+                ProcessBuilder("afplay", soundPath)
                     .redirectErrorStream(true)
                     .start()
                     .waitFor()

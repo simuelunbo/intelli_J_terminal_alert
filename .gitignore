@@ -25,3 +25,6 @@ gradle/wrapper/gradle-wrapper.jar
 
 # Blog draft
 blog_draft.md
+
+# Compiled classes
+*.class
