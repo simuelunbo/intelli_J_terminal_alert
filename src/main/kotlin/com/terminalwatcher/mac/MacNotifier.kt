@@ -5,9 +5,11 @@ import com.intellij.notification.NotificationType
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.ui.SystemNotifications
+import com.intellij.openapi.application.ApplicationManager
 import com.terminalwatcher.settings.SettingsState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -87,16 +89,23 @@ class MacNotifier(private val scope: CoroutineScope) {
         synchronized(this) {
             badgeCount = 0
         }
-        updateDockBadge("")
+        updateDockBadge(null)
         log.info("[TWatcher] Badge counter reset")
     }
 
     private fun incrementBadge() {
         val count = synchronized(this) { ++badgeCount }
         updateDockBadge(count.toString())
+
+        if (ApplicationManager.getApplication().isActive) {
+            scope.launch {
+                delay(BADGE_FLASH_MS)
+                resetBadge()
+            }
+        }
     }
 
-    private fun updateDockBadge(label: String) {
+    private fun updateDockBadge(label: String?) {
         try {
             if (java.awt.Taskbar.isTaskbarSupported()) {
                 java.awt.Taskbar.getTaskbar().setIconBadge(label)
@@ -122,6 +131,7 @@ class MacNotifier(private val scope: CoroutineScope) {
     companion object {
         private const val THROTTLE_WINDOW_MS = 2000L
         private const val GLOBAL_THROTTLE_MS = 5000L
+        private const val BADGE_FLASH_MS = 500L
         private const val NOTIFICATION_GROUP_ID = "Terminal AI Watcher"
         private const val SYSTEM_NOTIFICATION_NAME = "terminal-ai-watcher"
         private val lastNotificationTimes = ConcurrentHashMap<String, Long>()
