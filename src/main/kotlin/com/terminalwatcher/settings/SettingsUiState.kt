@@ -34,6 +34,7 @@ sealed interface SettingsAction {
     data class ToggleSound(val enabled: Boolean) : SettingsAction
     data class SelectSound(val name: String) : SettingsAction
     data class SelectCustomSoundPath(val path: String) : SettingsAction
+    data class PreviewSound(val path: String) : SettingsAction
 
     // CLI 도구
     data class ToggleClaudeCode(val enabled: Boolean) : SettingsAction

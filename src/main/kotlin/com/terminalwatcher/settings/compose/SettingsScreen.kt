@@ -69,7 +69,10 @@ fun SettingsScreen(
                     SettingsUiState.SYSTEM_SOUNDS.forEach { sound ->
                         selectableItem(
                             selected = uiState.soundName == sound,
-                            onClick = { onAction(SettingsAction.SelectSound(sound)) },
+                            onClick = {
+                                onAction(SettingsAction.SelectSound(sound))
+                                onAction(SettingsAction.PreviewSound("/System/Library/Sounds/$sound.aiff"))
+                            },
                         ) { Text(sound) }
                     }
                 },
@@ -95,6 +98,7 @@ fun SettingsScreen(
                     .withFileFilter { it.extension in SOUND_EXTENSIONS }
                 FileChooser.chooseFile(descriptor, null, null) { file ->
                     onAction(SettingsAction.SelectCustomSoundPath(file.path))
+                    onAction(SettingsAction.PreviewSound(file.path))
                 }
             }) { Text("Browse\u2026") }
             if (uiState.customSoundPath.isNotEmpty()) {

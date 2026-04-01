@@ -29,6 +29,7 @@ class SettingsViewModel {
                 _uiState.update { it.copy(soundName = action.name) }
             is SettingsAction.SelectCustomSoundPath ->
                 _uiState.update { it.copy(customSoundPath = action.path) }
+            is SettingsAction.PreviewSound -> previewSound(action.path)
             is SettingsAction.ToggleClaudeCode ->
                 _uiState.update { it.copy(enableClaudeCode = action.enabled) }
             is SettingsAction.ToggleCodex ->
@@ -40,6 +41,18 @@ class SettingsViewModel {
 
     // Framework integration (read-only 조회, 상태 변경 없음)
     fun isModified(): Boolean = _uiState.value != savedSnapshot
+
+    private fun previewSound(path: String) {
+        if (!java.io.File(path).exists()) return
+        Thread {
+            try {
+                ProcessBuilder("afplay", path)
+                    .redirectErrorStream(true)
+                    .start()
+                    .waitFor()
+            } catch (_: Exception) { }
+        }.start()
+    }
 
     private fun loadSettings() {
         val data = SettingsState.getInstance().state

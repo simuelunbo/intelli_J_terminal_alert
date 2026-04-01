@@ -56,7 +56,9 @@ object DslSettingsPanel {
                     comboBox(SettingsUiState.SYSTEM_SOUNDS).apply {
                         component.selectedItem = state.soundName
                         component.addActionListener {
-                            viewModel.onAction(SettingsAction.SelectSound(component.selectedItem as? String ?: "Glass"))
+                            val selected = component.selectedItem as? String ?: "Glass"
+                            viewModel.onAction(SettingsAction.SelectSound(selected))
+                            viewModel.onAction(SettingsAction.PreviewSound("/System/Library/Sounds/$selected.aiff"))
                         }
                     }
                 }
@@ -71,7 +73,11 @@ object DslSettingsPanel {
                             override fun removeUpdate(e: javax.swing.event.DocumentEvent?) = sync()
                             override fun changedUpdate(e: javax.swing.event.DocumentEvent?) = sync()
                             private fun sync() {
-                                viewModel.onAction(SettingsAction.SelectCustomSoundPath(component.text))
+                                val path = component.text
+                                viewModel.onAction(SettingsAction.SelectCustomSoundPath(path))
+                                if (path.isNotBlank()) {
+                                    viewModel.onAction(SettingsAction.PreviewSound(path))
+                                }
                             }
                         })
                     }
