@@ -12,14 +12,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.intellij.openapi.fileChooser.FileChooser
+import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.terminalwatcher.settings.SettingsAction
 import com.terminalwatcher.settings.SettingsUiState
 import org.jetbrains.jewel.ui.component.CheckboxRow
 import org.jetbrains.jewel.ui.component.Dropdown
+import org.jetbrains.jewel.ui.component.OutlinedButton
 import org.jetbrains.jewel.ui.component.Text
-import org.jetbrains.jewel.ui.component.TextField
 
 @Composable
 fun SettingsScreen(
@@ -80,12 +83,26 @@ fun SettingsScreen(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("Custom file:", modifier = Modifier.width(120.dp))
-            TextField(
-                value = uiState.customSoundPath,
-                onValueChange = { onAction(SettingsAction.SelectCustomSoundPath(it)) },
+            Text(
+                text = uiState.customSoundPath.ifEmpty { "No file selected" },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("e.g. /path/to/sound.aiff") },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
+            Spacer(Modifier.width(8.dp))
+            OutlinedButton(onClick = {
+                val descriptor = FileChooserDescriptorFactory.createSingleFileDescriptor()
+                    .withFileFilter { it.extension in SOUND_EXTENSIONS }
+                FileChooser.chooseFile(descriptor, null, null) { file ->
+                    onAction(SettingsAction.SelectCustomSoundPath(file.path))
+                }
+            }) { Text("Browse\u2026") }
+            if (uiState.customSoundPath.isNotEmpty()) {
+                Spacer(Modifier.width(4.dp))
+                OutlinedButton(onClick = {
+                    onAction(SettingsAction.SelectCustomSoundPath(""))
+                }) { Text("Clear") }
+            }
         }
 
         Spacer(Modifier.height(12.dp))
@@ -118,3 +135,5 @@ private fun SectionHeader(title: String) {
         modifier = Modifier.padding(bottom = 4.dp, top = 8.dp),
     )
 }
+
+private val SOUND_EXTENSIONS = setOf("aiff", "aif", "wav", "mp3", "m4a", "caf")

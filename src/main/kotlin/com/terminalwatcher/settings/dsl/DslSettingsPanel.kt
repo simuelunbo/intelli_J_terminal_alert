@@ -1,5 +1,6 @@
 package com.terminalwatcher.settings.dsl
 
+import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.ui.dsl.builder.panel
 import com.terminalwatcher.settings.SettingsAction
 import com.terminalwatcher.settings.SettingsUiState
@@ -8,6 +9,8 @@ import javax.swing.JCheckBox
 import javax.swing.JComponent
 
 object DslSettingsPanel {
+
+    private val SOUND_EXTENSIONS = setOf("aiff", "aif", "wav", "mp3", "m4a", "caf")
 
     fun create(viewModel: SettingsViewModel): JComponent {
         val state = viewModel.uiState.value
@@ -58,9 +61,14 @@ object DslSettingsPanel {
                     }
                 }
                 row("Custom file:") {
-                    textField().apply {
+                    val descriptor = FileChooserDescriptorFactory.createSingleFileDescriptor()
+                        .withFileFilter { it.extension in SOUND_EXTENSIONS }
+                    textFieldWithBrowseButton(
+                        browseDialogTitle = "Select Sound File",
+                        fileChooserDescriptor = descriptor,
+                    ).apply {
                         component.text = state.customSoundPath
-                        component.document.addDocumentListener(object : javax.swing.event.DocumentListener {
+                        component.textField.document.addDocumentListener(object : javax.swing.event.DocumentListener {
                             override fun insertUpdate(e: javax.swing.event.DocumentEvent?) = sync()
                             override fun removeUpdate(e: javax.swing.event.DocumentEvent?) = sync()
                             override fun changedUpdate(e: javax.swing.event.DocumentEvent?) = sync()
