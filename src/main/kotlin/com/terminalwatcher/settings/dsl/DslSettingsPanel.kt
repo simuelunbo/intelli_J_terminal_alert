@@ -63,10 +63,8 @@ object DslSettingsPanel {
                 row("Custom file:") {
                     val descriptor = FileChooserDescriptorFactory.createSingleFileDescriptor()
                         .withFileFilter { it.extension in SOUND_EXTENSIONS }
-                    textFieldWithBrowseButton(
-                        browseDialogTitle = "Select Sound File",
-                        fileChooserDescriptor = descriptor,
-                    ).apply {
+                        .withTitle("Select Sound File")
+                    textFieldWithBrowseButton(descriptor).apply {
                         component.text = state.customSoundPath
                         component.textField.document.addDocumentListener(object : javax.swing.event.DocumentListener {
                             override fun insertUpdate(e: javax.swing.event.DocumentEvent?) = sync()
