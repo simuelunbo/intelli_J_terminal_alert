@@ -47,6 +47,10 @@
         </ul>
     ]]></change-notes>
 
+    <content>
+        <module name="com.terminalwatcher.compose-ui"/>
+    </content>
+
     <depends>com.intellij.modules.platform</depends>
     <depends>org.jetbrains.plugins.terminal</depends>
 

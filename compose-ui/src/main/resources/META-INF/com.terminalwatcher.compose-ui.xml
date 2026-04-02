@@ -1,0 +1,8 @@
+<idea-plugin package="com.terminalwatcher.settings.compose">
+    <dependencies>
+        <module name="intellij.platform.compose"/>
+        <module name="intellij.platform.jewel.foundation"/>
+        <module name="intellij.platform.jewel.ui"/>
+        <module name="intellij.platform.jewel.ideLafBridge"/>
+    </dependencies>
+</idea-plugin>

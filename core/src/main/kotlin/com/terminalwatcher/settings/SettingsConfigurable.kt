@@ -39,8 +39,23 @@ class SettingsConfigurable : Configurable {
     private fun rebuildContent() {
         val panel = wrapper ?: return
         panel.removeAll()
-        panel.add(DslSettingsPanel.create(viewModel), BorderLayout.CENTER)
+        val content = createComposePanel() ?: DslSettingsPanel.create(viewModel)
+        panel.add(content, BorderLayout.CENTER)
         panel.revalidate()
         panel.repaint()
+    }
+
+    private fun createComposePanel(): JComponent? = try {
+        val clazz = Class.forName("com.terminalwatcher.settings.compose.ComposeSettingsPanel")
+        val instance = clazz.getField("INSTANCE").get(null)
+        val method = clazz.getMethod(
+            "create",
+            kotlinx.coroutines.flow.StateFlow::class.java,
+            kotlin.jvm.functions.Function1::class.java,
+        )
+        val onAction: (SettingsAction) -> Unit = viewModel::onAction
+        method.invoke(instance, viewModel.uiState, onAction) as? JComponent
+    } catch (_: Exception) {
+        null
     }
 }
