@@ -16,7 +16,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.intellij.openapi.fileChooser.FileChooser
-import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
+import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.terminalwatcher.settings.SettingsAction
 import com.terminalwatcher.settings.SettingsUiState
 import org.jetbrains.jewel.ui.component.CheckboxRow
@@ -94,7 +94,7 @@ fun SettingsScreen(
             )
             Spacer(Modifier.width(8.dp))
             OutlinedButton(onClick = {
-                val descriptor = FileChooserDescriptorFactory.createSingleFileDescriptor()
+                val descriptor = FileChooserDescriptor(true, false, false, false, false, false)
                     .withFileFilter { it.extension in SOUND_EXTENSIONS }
                 FileChooser.chooseFile(descriptor, null, null) { file ->
                     onAction(SettingsAction.SelectCustomSoundPath(file.path))

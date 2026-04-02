@@ -1,6 +1,6 @@
 package com.terminalwatcher.settings.dsl
 
-import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
+import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.ui.dsl.builder.panel
 import com.terminalwatcher.settings.SettingsAction
 import com.terminalwatcher.settings.SettingsUiState
@@ -63,7 +63,7 @@ object DslSettingsPanel {
                     }
                 }
                 row("Custom file:") {
-                    val descriptor = FileChooserDescriptorFactory.createSingleFileDescriptor()
+                    val descriptor = FileChooserDescriptor(true, false, false, false, false, false)
                         .withFileFilter { it.extension in SOUND_EXTENSIONS }
                         .withTitle("Select Sound File")
                     textFieldWithBrowseButton(descriptor).apply {

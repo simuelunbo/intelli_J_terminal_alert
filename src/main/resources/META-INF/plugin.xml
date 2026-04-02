@@ -12,17 +12,11 @@
         <h2>1.1.0</h2>
         <ul>
             <li><b>New:</b> Granular notification controls — independently toggle Dock badge, system notification, IDE balloon, and sound</li>
-            <li><b>New:</b> Customizable sound — select from 11 system sounds or browse for a custom audio file (aiff, wav, mp3, m4a, caf)</li>
-            <li><b>New:</b> Sound preview — hear the selected sound immediately when choosing from dropdown or file browser</li>
-            <li><b>New:</b> Compose (Jewel) settings UI with automatic DSL fallback for older IDE versions</li>
-            <li><b>New:</b> File browser dialog for custom sound selection</li>
-            <li><b>Fix:</b> Badge count now auto-clears when IDE already has focus (0.5s flash then reset)</li>
-            <li><b>Fix:</b> Codex notifications broadcasting to all IDE instances — now routes only to originating IDE</li>
-            <li><b>Fix:</b> Codex notify script stale detection strengthened for v1.0.x → v1.1.0 upgrade</li>
-            <li><b>Fix:</b> Deprecated textFieldWithBrowseButton API replaced with FileChooserDescriptor</li>
-            <li><b>Improve:</b> MVI architecture (ViewModel + UiState) for settings management</li>
-            <li><b>Improve:</b> Early return in NotificationDispatcher when all channels disabled</li>
-            <li><b>Improve:</b> v1.0.x → v1.1.0 settings auto-migration</li>
+            <li><b>New:</b> Customizable alert sound — choose from 11 system sounds or browse for your own audio file</li>
+            <li><b>New:</b> Sound preview — hear the sound immediately when selecting</li>
+            <li><b>Fix:</b> Badge count now auto-clears when IDE already has focus</li>
+            <li><b>Fix:</b> Codex notifications no longer appear in all open IDE windows</li>
+            <li><b>Fix:</b> Settings preserved when upgrading from v1.0.x</li>
         </ul>
         <h2>1.0.2</h2>
         <ul>

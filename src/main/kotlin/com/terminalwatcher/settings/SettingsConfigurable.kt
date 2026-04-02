@@ -1,7 +1,6 @@
 package com.terminalwatcher.settings
 
 import com.intellij.openapi.options.Configurable
-import com.terminalwatcher.settings.compose.ComposeSettingsPanel
 import com.terminalwatcher.settings.dsl.DslSettingsPanel
 import java.awt.BorderLayout
 import javax.swing.JComponent
@@ -40,20 +39,23 @@ class SettingsConfigurable : Configurable {
     private fun rebuildContent() {
         val panel = wrapper ?: return
         panel.removeAll()
-        val content = if (isJewelAvailable()) {
-            ComposeSettingsPanel.create(viewModel)
-        } else {
-            DslSettingsPanel.create(viewModel)
-        }
+        val content = createComposePanel() ?: DslSettingsPanel.create(viewModel)
         panel.add(content, BorderLayout.CENTER)
         panel.revalidate()
         panel.repaint()
     }
 
-    private fun isJewelAvailable(): Boolean = try {
+    /**
+     * Compose/Jewel 패널을 reflection으로 로드.
+     * 직접 import를 피하여 Compose 미지원 IDE에서 바이너리 호환성 문제 방지.
+     */
+    private fun createComposePanel(): JComponent? = try {
         Class.forName("org.jetbrains.jewel.bridge.theme.SwingBridgeThemeKt")
-        true
-    } catch (_: ClassNotFoundException) {
-        false
+        val clazz = Class.forName("com.terminalwatcher.settings.compose.ComposeSettingsPanel")
+        val instance = clazz.getField("INSTANCE").get(null)
+        val method = clazz.getMethod("create", SettingsViewModel::class.java)
+        method.invoke(instance, viewModel) as? JComponent
+    } catch (_: Exception) {
+        null
     }
 }
