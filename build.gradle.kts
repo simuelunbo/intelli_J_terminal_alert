@@ -2,8 +2,6 @@ plugins {
     id("java")
     id("org.jetbrains.kotlin.jvm") version "2.1.20"
     kotlin("plugin.serialization") version "2.1.20"
-    kotlin("plugin.compose") version "2.1.20"
-    id("org.jetbrains.compose") version "1.7.3"
     id("org.jetbrains.intellij.platform") version "2.13.1"
 }
 
@@ -21,15 +19,6 @@ dependencies {
     intellijPlatform {
         local("/Applications/Android Studio.app/Contents")
         bundledPlugin("org.jetbrains.plugins.terminal")
-
-        // Jewel + Compose (bundled in IntelliJ 2025.1+)
-        bundledModule("intellij.platform.jewel.foundation")
-        bundledModule("intellij.platform.jewel.ui")
-        bundledModule("intellij.platform.jewel.ideLafBridge")
-        bundledModule("intellij.libraries.compose.foundation.desktop")
-        bundledModule("intellij.libraries.compose.runtime.desktop")
-        bundledModule("intellij.libraries.skiko")
-        bundledModule("intellij.platform.compose")
     }
 
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
