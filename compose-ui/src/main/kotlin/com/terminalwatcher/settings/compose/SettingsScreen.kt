@@ -38,12 +38,12 @@ fun SettingsScreen(
         CheckboxRow(
             checked = uiState.enableBadgeCount,
             onCheckedChange = { onAction(SettingsAction.ToggleBadgeCount(it)) },
-        ) { Text("Dock badge count") }
+        ) { Text(uiState.osLabels.badgeLabel) }
 
         CheckboxRow(
             checked = uiState.enableSystemNotification,
             onCheckedChange = { onAction(SettingsAction.ToggleSystemNotification(it)) },
-        ) { Text("macOS system notification") }
+        ) { Text(uiState.osLabels.systemNotificationLabel) }
 
         CheckboxRow(
             checked = uiState.enableIdeBalloon,
@@ -66,12 +66,12 @@ fun SettingsScreen(
             Text("Default sound:", modifier = Modifier.width(120.dp))
             Dropdown(
                 menuContent = {
-                    SettingsUiState.SYSTEM_SOUNDS.forEach { sound ->
+                    uiState.soundList.forEach { sound ->
                         selectableItem(
                             selected = uiState.soundName == sound,
                             onClick = {
                                 onAction(SettingsAction.SelectSound(sound))
-                                onAction(SettingsAction.PreviewSound("/System/Library/Sounds/$sound.aiff"))
+                                onAction(SettingsAction.PreviewSound(uiState.defaultSoundPath(sound)))
                             },
                         ) { Text(sound) }
                     }
@@ -95,7 +95,7 @@ fun SettingsScreen(
             Spacer(Modifier.width(8.dp))
             OutlinedButton(onClick = {
                 val descriptor = FileChooserDescriptor(true, false, false, false, false, false)
-                    .withFileFilter { it.extension in SOUND_EXTENSIONS }
+                    .withFileFilter { it.extension in uiState.osLabels.supportedSoundExtensions }
                 FileChooser.chooseFile(descriptor, null, null) { file ->
                     onAction(SettingsAction.SelectCustomSoundPath(file.path))
                     onAction(SettingsAction.PreviewSound(file.path))
@@ -139,5 +139,3 @@ private fun SectionHeader(title: String) {
         modifier = Modifier.padding(bottom = 4.dp, top = 8.dp),
     )
 }
-
-private val SOUND_EXTENSIONS = setOf("aiff", "aif", "wav", "mp3", "m4a", "caf")

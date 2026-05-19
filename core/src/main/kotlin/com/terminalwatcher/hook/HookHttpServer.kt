@@ -8,7 +8,8 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.wm.IdeFrame
 import com.sun.net.httpserver.HttpServer
 import com.terminalwatcher.dispatch.NotificationDispatcher
-import com.terminalwatcher.mac.MacNotifier
+import com.terminalwatcher.notify.NotifierProvider
+import com.terminalwatcher.terminal.TabRegistry
 import com.terminalwatcher.terminal.TerminalTabTracker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,9 +58,30 @@ class HookHttpServer(
                         val body = exchange.requestBody.bufferedReader().readText()
                         val query = exchange.requestURI.query.orEmpty()
                         val tool = query.substringAfter("tool=", "").substringBefore("&")
-                        log.info("[TWatcher] Hook received: tool=$tool, body=${body.take(300)}")
+                        val shellPid = query.substringAfter("shell_pid=", "").substringBefore("&")
+                            .toLongOrNull()
+                        val tabIdHeader = exchange.requestHeaders.getFirst("X-TWatcher-Tab-Id")
+                            ?.takeIf { it.isNotBlank() }
+                        val projectIdHeader = exchange.requestHeaders.getFirst("X-TWatcher-Project-Id")
+                            ?.takeIf { it.isNotBlank() }
+                        log.info(
+                            "[TWatcher] Hook received: tool=$tool, shell_pid=$shellPid, " +
+                                "tab_id=$tabIdHeader, project_id=$projectIdHeader, body=${body.take(300)}",
+                        )
 
-                        val event = parseToHookEvent(body, tool)
+                        // Silent-drop: a request carrying a projectId that doesn't match
+                        // any open project here was meant for a different IDE instance.
+                        if (projectIdHeader != null) {
+                            val tabRegistry = ApplicationManager.getApplication()
+                                .getService(TabRegistry::class.java)
+                            if (tabRegistry?.findProjectByProjectId(projectIdHeader) == null) {
+                                log.info("[TWatcher] Silent-drop: projectId=$projectIdHeader has no matching open project here")
+                                exchange.sendResponseHeaders(204, -1)
+                                return@createContext
+                            }
+                        }
+
+                        val event = parseToHookEvent(body, tool, shellPid, tabIdHeader, projectIdHeader)
                         if (event != null) {
                             NotificationDispatcher.dispatchHookEvent(event)
                         }
@@ -149,7 +171,13 @@ class HookHttpServer(
         }
     }
 
-    private fun parseToHookEvent(rawJson: String, tool: String): HookEvent? {
+    private fun parseToHookEvent(
+        rawJson: String,
+        tool: String,
+        shellPid: Long?,
+        tabIdHeader: String? = null,
+        projectIdHeader: String? = null,
+    ): HookEvent? {
         return try {
             val payload = json.decodeFromString<HookPayload>(rawJson)
 
@@ -176,13 +204,30 @@ class HookHttpServer(
                 ?: payload.lastAssistantMessageAlt
                 ?: payload.promptResponse
 
+            // Prefer exact tab match via TabRegistry when tabId came through env.
+            // Falls back to the legacy heuristic chain otherwise — preserving
+            // behavior for terminals opened before plugin init.
+            val tabRegistry = ApplicationManager.getApplication()
+                .getService(TabRegistry::class.java)
+            val tabNameFromRegistry = tabIdHeader
+                ?.let { tabRegistry?.lookup(it) }
+                ?.contentRef?.get()?.displayName
+            val tabName = tabNameFromRegistry
+                ?: TerminalTabTracker.getTabNameByShellPid(shellPid)
+                ?: TerminalTabTracker.getTabNameByActiveTab(payload.cwd)
+                ?: TerminalTabTracker.getTabNameByCwd(payload.cwd)
+                ?: TerminalTabTracker.getTabNameForSingleTabProject(payload.cwd)
+                ?: TerminalTabTracker.getTabNameBySelectedTab(payload.cwd)
+
             HookEvent(
                 tool = resolvedTool,
                 eventType = eventType,
                 message = message,
                 sessionId = payload.sessionId ?: payload.threadId,
                 cwd = payload.cwd,
-                tabName = TerminalTabTracker.getTabNameByCwd(payload.cwd),
+                tabName = tabName,
+                tabId = tabIdHeader,
+                projectId = projectIdHeader,
             )
         } catch (e: Exception) {
             log.warn("[TWatcher] Failed to parse hook event JSON", e)
@@ -195,9 +240,7 @@ class HookHttpServer(
             ApplicationActivationListener.TOPIC,
             object : ApplicationActivationListener {
                 override fun applicationActivated(ideFrame: IdeFrame) {
-                    ApplicationManager.getApplication()
-                        .getService(MacNotifier::class.java)
-                        .resetBadge()
+                    NotifierProvider.get().resetBadge()
                 }
             },
         )

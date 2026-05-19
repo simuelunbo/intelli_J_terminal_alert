@@ -3,14 +3,11 @@ package com.terminalwatcher.settings.dsl
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.ui.dsl.builder.panel
 import com.terminalwatcher.settings.SettingsAction
-import com.terminalwatcher.settings.SettingsUiState
 import com.terminalwatcher.settings.SettingsViewModel
 import javax.swing.JCheckBox
 import javax.swing.JComponent
 
 object DslSettingsPanel {
-
-    private val SOUND_EXTENSIONS = setOf("aiff", "aif", "wav", "mp3", "m4a", "caf")
 
     fun create(viewModel: SettingsViewModel): JComponent {
         val state = viewModel.uiState.value
@@ -18,7 +15,7 @@ object DslSettingsPanel {
         return panel {
             group("Notification Channels") {
                 row {
-                    checkBox("Dock badge count").apply {
+                    checkBox(state.osLabels.badgeLabel).apply {
                         component.isSelected = state.enableBadgeCount
                         component.addActionListener {
                             viewModel.onAction(SettingsAction.ToggleBadgeCount((it.source as JCheckBox).isSelected))
@@ -26,7 +23,7 @@ object DslSettingsPanel {
                     }
                 }
                 row {
-                    checkBox("macOS system notification").apply {
+                    checkBox(state.osLabels.systemNotificationLabel).apply {
                         component.isSelected = state.enableSystemNotification
                         component.addActionListener {
                             viewModel.onAction(SettingsAction.ToggleSystemNotification((it.source as JCheckBox).isSelected))
@@ -53,18 +50,20 @@ object DslSettingsPanel {
 
             group("Sound") {
                 row("Default sound:") {
-                    comboBox(SettingsUiState.SYSTEM_SOUNDS).apply {
+                    comboBox(state.soundList).apply {
                         component.selectedItem = state.soundName
                         component.addActionListener {
-                            val selected = component.selectedItem as? String ?: "Glass"
+                            val fallback = state.soundList.firstOrNull().orEmpty()
+                            val selected = component.selectedItem as? String ?: fallback
+                            if (selected.isBlank()) return@addActionListener
                             viewModel.onAction(SettingsAction.SelectSound(selected))
-                            viewModel.onAction(SettingsAction.PreviewSound("/System/Library/Sounds/$selected.aiff"))
+                            viewModel.onAction(SettingsAction.PreviewSound(state.defaultSoundPath(selected)))
                         }
                     }
                 }
                 row("Custom file:") {
                     val descriptor = FileChooserDescriptor(true, false, false, false, false, false)
-                        .withFileFilter { it.extension in SOUND_EXTENSIONS }
+                        .withFileFilter { it.extension in state.osLabels.supportedSoundExtensions }
                         .withTitle("Select Sound File")
                     textFieldWithBrowseButton(descriptor).apply {
                         component.text = state.customSoundPath

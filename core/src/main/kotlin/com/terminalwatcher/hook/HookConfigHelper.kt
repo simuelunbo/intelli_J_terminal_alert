@@ -15,23 +15,37 @@ object HookConfigHelper {
     private const val PORTS_DIR = ".terminal-watcher/ports"
 
     /**
-     * 포트 파일에서 동적으로 포트를 읽어 curl 전송.
-     * PID가 살아있는 포트 파일만 사용하여 stale 파일 문제 방지.
-     * 여러 IDE가 동시 실행 중이면 모든 IDE에 이벤트 전송 (broadcast).
+     * v3 routing — INTELLIJ_TERMINAL_WATCHER_* env vars (injected by
+     * TerminalWatcherEnvCustomizer) take priority over PPID-walking. Per-tab
+     * routing carried in headers (X-TWatcher-Tab-Id / X-TWatcher-Project-Id).
+     * PPID-walk retained as fallback for terminals opened before plugin init,
+     * or shells that drop env (e.g. login shells with strict profiles).
      */
     private fun curlCmd(tool: String) =
         "bash -c '" +
             "[ \"\$TERMINAL_EMULATOR\" != \"JetBrains-JediTerm\" ] && exit 0; " +
             "INPUT=\$(cat); " +
-            "P=\$\$; " +
+            "TAB=\"\${INTELLIJ_TERMINAL_WATCHER_TAB_ID:-}\"; " +
+            "PROJ=\"\${INTELLIJ_TERMINAL_WATCHER_PROJECT_ID:-}\"; " +
+            "PORT=\"\${INTELLIJ_TERMINAL_WATCHER_PORT:-}\"; " +
+            "SHELL_PID=\$\$; " +
+            "if [ -z \"\$PORT\" ]; then " +
+            "P=\$\$; PREV=\$P; " +
             "while [ \"\$P\" != \"1\" ]; do " +
+            "PREV=\$P; " +
             "P=\$(ps -o ppid= -p \"\$P\" 2>/dev/null | xargs); " +
-            "[ -z \"\$P\" ] && exit 0; " +
-            "[ -f ~/$PORTS_DIR/\"\$P\".port ] && { " +
-            "PORT=\$(cat ~/$PORTS_DIR/\"\$P\".port); " +
-            "echo \"\$INPUT\" | curl -s -X POST \"http://127.0.0.1:\$PORT/event?tool=$tool\" " +
-            "-H \"Content-Type: application/json\" -d @-; exit 0; }; " +
-            "done'"
+            "[ -z \"\$P\" ] && break; " +
+            "if [ -f ~/$PORTS_DIR/\"\$P\".port ]; then " +
+            "PORT=\$(cat ~/$PORTS_DIR/\"\$P\".port); SHELL_PID=\$PREV; break; " +
+            "fi; " +
+            "done; " +
+            "fi; " +
+            "[ -z \"\$PORT\" ] && exit 0; " +
+            "echo \"\$INPUT\" | curl -s -X POST \"http://127.0.0.1:\$PORT/event?tool=$tool&shell_pid=\$SHELL_PID\" " +
+            "-H \"Content-Type: application/json\" " +
+            "-H \"X-TWatcher-Tab-Id: \$TAB\" " +
+            "-H \"X-TWatcher-Project-Id: \$PROJ\" " +
+            "-d @-'"
 
     private val prettyJson = Json {
         prettyPrint = true
@@ -155,7 +169,10 @@ object HookConfigHelper {
             val hooksStr = root["hooks"]?.toString().orEmpty()
             val hasStaleConfig = hooksStr.contains("..terminal-watcher") || hooksStr.contains("19876")
             val hasCorrectHooks = hooksStr.contains("terminal-watcher") &&
-                hooksStr.contains("JetBrains-JediTerm") && !hasStaleConfig
+                hooksStr.contains("JetBrains-JediTerm") &&
+                hooksStr.contains("shell_pid") &&
+                hooksStr.contains("INTELLIJ_TERMINAL_WATCHER_PORT") &&
+                !hasStaleConfig
 
             if (hasCorrectHooks) {
                 log.info("[TWatcher] $label hooks already configured")
@@ -192,24 +209,40 @@ object HookConfigHelper {
             val scriptFile = File(codexDir, "notify-twatcher.sh")
             val scriptContent = if (scriptFile.exists()) scriptFile.readText() else ""
             val hasCorrectScript = scriptContent.contains("terminal-watcher") &&
-                scriptContent.contains("JetBrains-JediTerm")
+                scriptContent.contains("JetBrains-JediTerm") &&
+                scriptContent.contains("shell_pid") &&
+                scriptContent.contains("INTELLIJ_TERMINAL_WATCHER_PORT")
 
             if (!hasCorrectScript) {
                 scriptFile.writeText(
                     """
                     |#!/bin/bash
+                    |# terminal-watcher notify v3 — env-var routing with PPID fallback
                     |[ "${'$'}TERMINAL_EMULATOR" != "JetBrains-JediTerm" ] && exit 0
-                    |P=${'$'}${'$'}
-                    |while [ "${'$'}P" != "1" ]; do
-                    |  P=${'$'}(ps -o ppid= -p "${'$'}P" 2>/dev/null | xargs)
-                    |  [ -z "${'$'}P" ] && exit 0
-                    |  if [ -f ~/$PORTS_DIR/"${'$'}P".port ]; then
-                    |    PORT=${'$'}(cat ~/$PORTS_DIR/"${'$'}P".port)
-                    |    curl -s -X POST "http://127.0.0.1:${'$'}PORT/event?tool=codex" \
-                    |      -H 'Content-Type: application/json' -d "${'$'}1"
-                    |    exit 0
-                    |  fi
-                    |done
+                    |TAB="${'$'}{INTELLIJ_TERMINAL_WATCHER_TAB_ID:-}"
+                    |PROJ="${'$'}{INTELLIJ_TERMINAL_WATCHER_PROJECT_ID:-}"
+                    |PORT="${'$'}{INTELLIJ_TERMINAL_WATCHER_PORT:-}"
+                    |SHELL_PID=${'$'}${'$'}
+                    |if [ -z "${'$'}PORT" ]; then
+                    |  P=${'$'}${'$'}
+                    |  PREV=${'$'}P
+                    |  while [ "${'$'}P" != "1" ]; do
+                    |    PREV=${'$'}P
+                    |    P=${'$'}(ps -o ppid= -p "${'$'}P" 2>/dev/null | xargs)
+                    |    [ -z "${'$'}P" ] && break
+                    |    if [ -f ~/$PORTS_DIR/"${'$'}P".port ]; then
+                    |      PORT=${'$'}(cat ~/$PORTS_DIR/"${'$'}P".port)
+                    |      SHELL_PID=${'$'}PREV
+                    |      break
+                    |    fi
+                    |  done
+                    |fi
+                    |[ -z "${'$'}PORT" ] && exit 0
+                    |curl -s -X POST "http://127.0.0.1:${'$'}PORT/event?tool=codex&shell_pid=${'$'}SHELL_PID" \
+                    |  -H 'Content-Type: application/json' \
+                    |  -H "X-TWatcher-Tab-Id: ${'$'}TAB" \
+                    |  -H "X-TWatcher-Project-Id: ${'$'}PROJ" \
+                    |  -d "${'$'}1"
                     """.trimMargin() + "\n",
                 )
                 scriptFile.setExecutable(true)
@@ -221,15 +254,17 @@ object HookConfigHelper {
             var modified = false
 
             var cleanedContent = content
-            if (!content.contains("notify-twatcher.sh")) {
+            if (!content.contains("# Terminal Watcher notify v2")) {
                 cleanedContent = content
-                    .replace(Regex("""# Added by Terminal AI Watcher plugin\n"""), "")
-                    .replace(Regex("""notify\s*=\s*\[.*]\n?"""), "")
-                    .replace(Regex("""notify\s*=\s*"[^"]*notify-twatcher[^"]*"\n?"""), "")
+                    .replace(Regex("""(?m)^# Terminal Watcher.*notify.*$\n?"""), "")
+                    .replace(Regex("""(?m)^# Added by Terminal AI Watcher plugin$\n?"""), "")
+                    .replace(Regex("""(?m)^notify\s*=\s*\[[^\]]*\]\s*$\n?"""), "")
+                    .replace(Regex("""(?m)^notify\s*=\s*"[^"]*notify-twatcher[^"]*"\s*$\n?"""), "")
                     .trimEnd()
 
                 val lines = cleanedContent.lines().toMutableList()
-                lines.add(1, "notify = [\"${scriptFile.absolutePath}\"]")
+                lines.add(0, "notify = [\"${scriptFile.absolutePath}\"]")
+                lines.add(0, "# Terminal Watcher notify v2")
                 cleanedContent = lines.joinToString("\n")
                 modified = true
             }

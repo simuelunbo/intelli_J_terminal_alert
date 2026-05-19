@@ -16,6 +16,8 @@ data class HookEvent(
     val sessionId: String?,
     val cwd: String?,
     val tabName: String? = null,
+    val tabId: String? = null,
+    val projectId: String? = null,
 )
 
 /**

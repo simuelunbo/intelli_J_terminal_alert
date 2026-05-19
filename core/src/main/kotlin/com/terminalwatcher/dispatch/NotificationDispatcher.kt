@@ -5,8 +5,11 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.terminalwatcher.hook.HookEvent
 import com.terminalwatcher.hook.HookEventType
-import com.terminalwatcher.mac.MacNotifier
+import com.terminalwatcher.notify.NotificationContext
+import com.terminalwatcher.notify.NotifierProvider
 import com.terminalwatcher.settings.SettingsState
+import com.terminalwatcher.terminal.TabRegistry
+import com.terminalwatcher.terminal.TerminalTabTracker
 
 object NotificationDispatcher {
 
@@ -26,20 +29,43 @@ object NotificationDispatcher {
         val subtitle = event.eventType.toSubtitle()
         val notificationType = event.eventType.toNotificationType()
 
-        val location = buildLocationTag(event.cwd, event.tabName)
-        val message = "$location${event.message?.take(200) ?: toolName}"
+        val context = resolveContext(event)
+        val rawMessage = event.message?.take(200) ?: toolName
 
-        log.info("[TWatcher] Notification: $toolName — $subtitle — $message")
+        log.info("[TWatcher] Notification: $toolName — $subtitle — ctx=$context — $rawMessage")
 
-        val notifier = ApplicationManager.getApplication().getService(MacNotifier::class.java)
+        val notifier = NotifierProvider.get()
         notifier.sendNotification(
             toolName = toolName,
             subtitle = subtitle,
-            message = message,
+            message = rawMessage,
             notificationType = notificationType,
+            context = context,
         )
 
         notifier.playSound()
+    }
+
+    private fun resolveContext(event: HookEvent): NotificationContext {
+        // 1) tabId → TabRegistry exact match (env-injected path)
+        val tabRegistry = ApplicationManager.getApplication()
+            .getService(TabRegistry::class.java)
+        val tabEntry = event.tabId?.let { tabRegistry?.lookup(it) }
+        val tabNameFromRegistry = tabEntry?.contentRef?.get()?.displayName
+        val projectFromRegistry = tabEntry?.projectId?.let { tabRegistry?.findProjectByProjectId(it) }
+
+        // 2) Fallback chain: registry-resolved → event.tabName (heuristics) → cwd-based project
+        val tabName = tabNameFromRegistry ?: event.tabName
+        val projectName = projectFromRegistry?.name
+            ?: event.cwd?.let { TerminalTabTracker.findProjectByCwd(it)?.name }
+            ?: event.cwd?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+
+        return NotificationContext(
+            projectName = projectName,
+            tabName = tabName,
+            projectId = event.projectId,
+            tabId = event.tabId,
+        )
     }
 
     private fun resolveToolName(tool: String): String = when (tool) {
@@ -47,16 +73,6 @@ object NotificationDispatcher {
         "codex" -> "Codex"
         "gemini" -> "Gemini CLI"
         else -> tool
-    }
-
-    private fun buildLocationTag(cwd: String?, tabName: String?): String {
-        val project = cwd?.substringAfterLast("/")?.takeIf { it.isNotBlank() }.orEmpty()
-        val tab = tabName.orEmpty()
-        return when {
-            project.isNotBlank() && tab.isNotBlank() -> "[$project/$tab] "
-            project.isNotBlank() -> "[$project] "
-            else -> ""
-        }
     }
 
     private fun HookEventType.toSubtitle(): String = when (this) {

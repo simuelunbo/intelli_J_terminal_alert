@@ -1,5 +1,7 @@
 package com.terminalwatcher.settings
 
+import com.intellij.openapi.util.SystemInfo
+import com.terminalwatcher.notify.NotifierProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -7,10 +9,16 @@ import kotlinx.coroutines.flow.update
 
 class SettingsViewModel {
 
-    private val _uiState = MutableStateFlow(SettingsUiState())
+    private val osLabels: OsLabels = when {
+        SystemInfo.isMac -> OsLabels.MAC
+        SystemInfo.isWindows -> OsLabels.WINDOWS
+        else -> OsLabels.LINUX
+    }
+
+    private val _uiState = MutableStateFlow(SettingsUiState(osLabels = osLabels))
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
-    private var savedSnapshot = SettingsUiState()
+    private var savedSnapshot = _uiState.value
 
     fun onAction(action: SettingsAction) {
         when (action) {
@@ -43,29 +51,38 @@ class SettingsViewModel {
     fun isModified(): Boolean = _uiState.value != savedSnapshot
 
     private fun previewSound(path: String) {
-        if (!java.io.File(path).exists()) return
-        Thread {
-            try {
-                ProcessBuilder("afplay", path)
-                    .redirectErrorStream(true)
-                    .start()
-                    .waitFor()
-            } catch (_: Exception) { }
-        }.start()
+        if (path.isBlank()) return
+        try {
+            NotifierProvider.get().previewSound(path)
+        } catch (_: Exception) {
+            // 미리듣기는 실패해도 설정 흐름을 중단하지 않는다
+        }
     }
 
     private fun loadSettings() {
         val data = SettingsState.getInstance().state
+        val savedSoundName = data.soundName.orEmpty().ifEmpty {
+            osLabels.soundList.firstOrNull().orEmpty()
+        }
+        // 저장된 이름이 현재 OS 사운드 리스트에 없으면 첫 항목으로 폴백
+        // (예: Mac에서 "Glass"를 설정 → Windows로 이동 시 "chimes"로 자동 보정)
+        val resolvedSoundName = when {
+            osLabels.soundList.isEmpty() -> savedSoundName
+            osLabels.soundList.contains(savedSoundName) -> savedSoundName
+            else -> osLabels.soundList.first()
+        }
+
         val state = SettingsUiState(
             enableBadgeCount = data.enableBadgeCount,
             enableSystemNotification = data.enableSystemNotification,
             enableIdeBalloon = data.enableIdeBalloon,
             enableSound = data.enableSound,
-            soundName = data.soundName.orEmpty().ifEmpty { "Glass" },
+            soundName = resolvedSoundName,
             customSoundPath = data.customSoundPath.orEmpty(),
             enableClaudeCode = data.enableClaudeCode,
             enableCodex = data.enableCodex,
             enableGeminiCli = data.enableGeminiCli,
+            osLabels = osLabels,
         )
         _uiState.value = state
         savedSnapshot = state

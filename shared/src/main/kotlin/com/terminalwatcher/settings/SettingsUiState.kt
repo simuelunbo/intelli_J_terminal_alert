@@ -1,5 +1,12 @@
 package com.terminalwatcher.settings
 
+/**
+ * 설정 화면 UI 상태.
+ *
+ * OS별 라벨·사운드 목록·확장자 필터는 [OsLabels]에 위임된다. [osLabels] 필드는
+ * `core/.../settings/SettingsViewModel.kt` 에서 OS를 감지해 주입한다.
+ * UI 레이어는 OS를 직접 감지하지 않고 이 상태에서 라벨과 리스트만 읽는다.
+ */
 data class SettingsUiState(
     val enableBadgeCount: Boolean = true,
     val enableSystemNotification: Boolean = true,
@@ -10,13 +17,11 @@ data class SettingsUiState(
     val enableClaudeCode: Boolean = true,
     val enableCodex: Boolean = true,
     val enableGeminiCli: Boolean = true,
+    val osLabels: OsLabels = OsLabels.MAC,
 ) {
-    companion object {
-        val SYSTEM_SOUNDS = listOf(
-            "Glass", "Pop", "Ping", "Purr", "Blow", "Bottle",
-            "Frog", "Hero", "Submarine", "Morse", "Tink",
-        )
-    }
+    val soundList: List<String> get() = osLabels.soundList
+
+    fun defaultSoundPath(name: String): String = osLabels.defaultSoundPath(name)
 }
 
 sealed interface SettingsAction {

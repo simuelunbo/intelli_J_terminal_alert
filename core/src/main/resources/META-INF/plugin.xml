@@ -9,41 +9,14 @@
     ]]></description>
 
     <change-notes><![CDATA[
-        <h2>1.1.0</h2>
+        <h2>1.2.0</h2>
         <ul>
-            <li><b>New:</b> Granular notification controls — independently toggle Dock badge, system notification, IDE balloon, and sound</li>
-            <li><b>New:</b> Customizable alert sound — choose from 11 system sounds or browse for your own audio file</li>
-            <li><b>New:</b> Sound preview — hear the sound immediately when selecting</li>
-            <li><b>Fix:</b> Badge count now auto-clears when IDE already has focus</li>
-            <li><b>Fix:</b> Codex notifications no longer appear in all open IDE windows</li>
-            <li><b>Fix:</b> Settings preserved when upgrading from v1.0.x</li>
-        </ul>
-        <h2>1.0.2</h2>
-        <ul>
-            <li><b>New:</b> macOS native notifications via SystemNotifications API — IDE icon displayed, click activates IDE</li>
-            <li><b>New:</b> IDE-only notifications — external terminals ignored (JetBrains-JediTerm filter)</li>
-            <li><b>New:</b> PPID chain routing — notifications go only to the originating IDE instance</li>
-            <li><b>New:</b> IntelliJ IDEA compatibility (build 261+) — works alongside Android Studio</li>
-            <li><b>New:</b> Dynamic port allocation — multiple IDEs run simultaneously without conflicts</li>
-            <li><b>New:</b> Codex tui.notifications for approval-requested alerts (terminal bell)</li>
-            <li><b>Fix:</b> Stale port file cleanup on startup (handles crash/force quit)</li>
-            <li><b>Fix:</b> Race condition resolved — server fully ready before hook registration</li>
-            <li><b>Fix:</b> Filtered out idle_prompt / auth_success noise notifications</li>
-            <li><b>Improve:</b> Dock badge counter auto-resets when IDE gains focus</li>
-            <li><b>Improve:</b> Migrated to SimplePersistentStateComponent (future-proof settings)</li>
-            <li><b>Improve:</b> Removed all reflection — uses official ContentManager API only</li>
-            <li><b>Improve:</b> Removed osascript dependency — all notifications via IDE internal APIs</li>
-        </ul>
-        <h2>1.0.0</h2>
-        <ul>
-            <li>AI CLI Hook-based event detection (zero false positives)</li>
-            <li>Claude Code: Notification + Stop hooks for permission prompts and task completion</li>
-            <li>Codex: notify hook for task completion (agent-turn-complete)</li>
-            <li>Gemini CLI: Notification + AfterAgent hooks for permission prompts and task completion</li>
-            <li>Built-in HTTP server (localhost:19876) receives hook events</li>
-            <li>Auto-configures hook settings for each CLI tool on first run</li>
-            <li>IntelliJ balloon notifications with sound alerts (afplay)</li>
-            <li>Per-tool enable/disable in Settings > Tools > Terminal AI Watcher</li>
+            <li><b>New:</b> Windows 10/11 support — native notifications, taskbar attention, and sound playback</li>
+            <li><b>New:</b> Per-tab notification routing — alerts are accurately attributed to the originating terminal tab, even when multiple tabs or IDE windows are open</li>
+            <li><b>New:</b> OS-aware settings UI — labels, sound options, and defaults adapt to the current operating system</li>
+            <li><b>Improve:</b> Notification readability — project and tab info shown as a separate subtitle line</li>
+            <li><b>Improve:</b> Hook configurations migrate automatically when upgrading from older versions</li>
+            <li><b>Improve:</b> Marketplace verifier friendly — no external native library dependencies</li>
         </ul>
     ]]></change-notes>
 
@@ -63,6 +36,10 @@
             serviceImplementation="com.terminalwatcher.hook.HookHttpServer"/>
         <applicationService
             serviceImplementation="com.terminalwatcher.mac.MacNotifier"/>
+        <applicationService
+            serviceImplementation="com.terminalwatcher.windows.WindowsNotifier"/>
+        <applicationService
+            serviceImplementation="com.terminalwatcher.fallback.FallbackNotifier"/>
         <projectConfigurable
             parentId="tools"
             instance="com.terminalwatcher.settings.SettingsConfigurable"
@@ -70,5 +47,10 @@
             displayName="Terminal AI Watcher"/>
         <postStartupActivity
             implementation="com.terminalwatcher.TerminalWatcherPlugin"/>
+    </extensions>
+
+    <extensions defaultExtensionNs="org.jetbrains.plugins.terminal">
+        <localTerminalCustomizer
+            implementation="com.terminalwatcher.terminal.TerminalWatcherEnvCustomizer"/>
     </extensions>
 </idea-plugin>

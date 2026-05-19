@@ -2,10 +2,12 @@ package com.terminalwatcher.mac
 
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.ui.SystemNotifications
-import com.intellij.openapi.application.ApplicationManager
+import com.terminalwatcher.notify.NotificationContext
+import com.terminalwatcher.notify.Notifier
 import com.terminalwatcher.settings.SettingsState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,30 +17,40 @@ import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 @Service(Service.Level.APP)
-class MacNotifier(private val scope: CoroutineScope) {
+class MacNotifier(private val scope: CoroutineScope) : Notifier {
 
     private val log = Logger.getInstance(MacNotifier::class.java)
 
     @Volatile
     private var badgeCount = 0
 
-    fun sendNotification(
+    override fun sendNotification(
         toolName: String,
         subtitle: String,
         message: String,
-        notificationType: NotificationType = NotificationType.INFORMATION,
+        notificationType: NotificationType,
+    ) = sendNotification(toolName, subtitle, message, notificationType, null)
+
+    override fun sendNotification(
+        toolName: String,
+        subtitle: String,
+        message: String,
+        notificationType: NotificationType,
+        context: NotificationContext?,
     ) {
         if (isGloballyThrottled()) return
         if (isThrottled(message)) return
 
         val state = SettingsState.getInstance().state
+        val locTag = Notifier.buildLocationTag(context).trim()
 
         if (state.enableIdeBalloon) {
             try {
-                NotificationGroupManager.getInstance()
+                val notification = NotificationGroupManager.getInstance()
                     .getNotificationGroup(NOTIFICATION_GROUP_ID)
                     .createNotification("$toolName — $subtitle", message, notificationType)
-                    .notify(null)
+                if (locTag.isNotBlank()) notification.subtitle = locTag
+                notification.notify(null)
             } catch (e: Exception) {
                 log.warn("[TWatcher] Failed to send IDE notification", e)
             }
@@ -46,8 +58,11 @@ class MacNotifier(private val scope: CoroutineScope) {
 
         if (state.enableSystemNotification) {
             try {
+                // SystemNotifications.notify(name, title, body) has no subtitle slot,
+                // so the location tag is folded into the body.
+                val sysBody = if (locTag.isNotBlank()) "$locTag $message" else message
                 SystemNotifications.getInstance().notify(
-                    SYSTEM_NOTIFICATION_NAME, "$toolName — $subtitle", message,
+                    SYSTEM_NOTIFICATION_NAME, "$toolName — $subtitle", sysBody,
                 )
             } catch (e: Exception) {
                 log.warn("[TWatcher] Failed to send system notification", e)
@@ -59,7 +74,7 @@ class MacNotifier(private val scope: CoroutineScope) {
         }
     }
 
-    fun playSound() {
+    override fun playSound() {
         val state = SettingsState.getInstance().state
         if (!state.enableSound) return
 
@@ -85,7 +100,22 @@ class MacNotifier(private val scope: CoroutineScope) {
         }
     }
 
-    fun resetBadge() {
+    override fun previewSound(path: String) {
+        if (path.isBlank()) return
+        scope.launch(Dispatchers.IO) {
+            try {
+                if (!File(path).exists()) return@launch
+                ProcessBuilder("afplay", path)
+                    .redirectErrorStream(true)
+                    .start()
+                    .waitFor()
+            } catch (e: Exception) {
+                log.warn("[TWatcher] Failed to preview sound: $path", e)
+            }
+        }
+    }
+
+    override fun resetBadge() {
         synchronized(this) {
             badgeCount = 0
         }
