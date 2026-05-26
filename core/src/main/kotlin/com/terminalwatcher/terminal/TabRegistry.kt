@@ -10,10 +10,10 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * In-memory registry mapping plugin-issued `tabId` UUIDs (injected via
- * [TerminalWatcherEnvCustomizer]) to the eventual IntelliJ [Content] that
- * hosts the terminal tab. The customizer runs *before* the toolwindow's
- * Content object exists, so this registry buffers "pending" entries and
- * [TerminalContentListener] binds them later via [bindNextPendingForProject].
+ * [TerminalWatcherEnvCustomizer]) to the IntelliJ [Content] that hosts the
+ * terminal tab. The customizer registers a "pending" entry and then, on the
+ * EDT via `invokeLater`, self-binds the resulting Content with [bindByTabId]
+ * (the ContentManager must only be touched on the EDT).
  *
  * Lookup is exact-match on tabId (cmux's surface-id equivalent). Listings
  * scoped by `projectId` (Project.locationHash) support fallback paths.

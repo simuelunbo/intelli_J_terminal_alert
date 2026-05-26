@@ -6,7 +6,6 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.ProjectActivity
 import com.terminalwatcher.hook.HookConfigHelper
 import com.terminalwatcher.hook.HookHttpServer
-import com.terminalwatcher.terminal.TerminalContentListener
 
 class TerminalWatcherPlugin : ProjectActivity {
 
@@ -20,8 +19,8 @@ class TerminalWatcherPlugin : ProjectActivity {
         // 서버가 준비된 후 hook 설정 등록
         HookConfigHelper.setupAllHooks(project.basePath)
 
-        // 터미널 탭 생성 시 TabRegistry 에 Content 를 사후 바인딩 — env-var 라우팅의 핵심
-        TerminalContentListener.attachTo(project)
+        // tabId↔Content 바인딩은 TerminalWatcherEnvCustomizer 의 invokeLater self-bind 가 전담한다.
+        // (여기서 ToolWindow ContentManager 를 건드리면 worker 스레드 → EDT 위반 + toolwindow 조기 초기화)
 
         log.info("[TWatcher] Plugin initialized for project: ${project.name}, port: ${hookServer.actualPort}")
     }
