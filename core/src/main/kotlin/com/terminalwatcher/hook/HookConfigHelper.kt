@@ -1,6 +1,7 @@
 package com.terminalwatcher.hook
 
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.util.SystemInfo
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
@@ -12,7 +13,63 @@ import java.io.File
 object HookConfigHelper {
 
     private val log = Logger.getInstance(HookConfigHelper::class.java)
-    private const val PORTS_DIR = ".terminal-watcher/ports"
+    private const val WATCHER_DIR = ".terminal-watcher"
+    private const val PORTS_DIR = "$WATCHER_DIR/ports"
+
+    /**
+     * Hook command selector.
+     * - Windows: PowerShell script (`notify.ps1`) invoked via powershell.exe (always in System32 PATH)
+     *   using curl.exe (Win10 1803+, System32). Avoids bash/node — neither is guaranteed on Windows
+     *   (Claude Code's native installer ships no Node on PATH; Git Bash may be absent). curl.exe is an
+     *   external exe, so it sidesteps PowerShell 5.1 module-load issues in Claude Code's hook context.
+     * - macOS/Linux: the proven bash + curl command.
+     */
+    private fun hookCmd(tool: String): String =
+        if (SystemInfo.isWindows) psCmd(tool) else curlCmd(tool)
+
+    private fun psScriptPath(): String =
+        File(System.getProperty("user.home"), "$WATCHER_DIR/notify.ps1").absolutePath
+
+    /** settings.json JSON-string command. Windows backslashes are auto-escaped by the JSON encoder. */
+    private fun psCmd(tool: String): String =
+        "powershell -NoProfile -ExecutionPolicy Bypass -File \"${psScriptPath()}\" $tool"
+
+    /**
+     * Windows notify script. Routes via INTELLIJ_TERMINAL_WATCHER_* env vars (no PPID-walk — Windows
+     * has no `ps`). Claude/Gemini pass the payload on stdin; Codex passes it as the last argv.
+     * Body is piped to curl.exe stdin (`--data-binary '@-'`) to dodge PowerShell 5.1's external-exe
+     * argument-quoting bug. Errors are swallowed so the hook never blocks the shell.
+     */
+    private val PS_SCRIPT = """
+        |if (${'$'}env:TERMINAL_EMULATOR -ne 'JetBrains-JediTerm') { exit 0 }
+        |${'$'}port = ${'$'}env:INTELLIJ_TERMINAL_WATCHER_PORT
+        |if (-not ${'$'}port) { exit 0 }
+        |${'$'}tool = if (${'$'}args.Count -ge 1 -and ${'$'}args[0]) { ${'$'}args[0] } else { 'unknown' }
+        |${'$'}uri = "http://127.0.0.1:${'$'}port/event?tool=${'$'}tool&shell_pid=${'$'}PID"
+        |${'$'}tab = ${'$'}env:INTELLIJ_TERMINAL_WATCHER_TAB_ID
+        |${'$'}proj = ${'$'}env:INTELLIJ_TERMINAL_WATCHER_PROJECT_ID
+        |${'$'}payload = if (${'$'}args.Count -ge 2 -and ${'$'}args[1]) { ${'$'}args[1] } else { [Console]::In.ReadToEnd() }
+        |if (-not ${'$'}payload) { ${'$'}payload = '{}' }
+        |try {
+        |  ${'$'}payload | & curl.exe -s -X POST ${'$'}uri `
+        |    -H "Content-Type: application/json" `
+        |    -H "X-TWatcher-Tab-Id: ${'$'}tab" `
+        |    -H "X-TWatcher-Project-Id: ${'$'}proj" `
+        |    --data-binary '@-' | Out-Null
+        |} catch {}
+    """.trimMargin() + "\n"
+
+    private fun writePsScriptIfWindows() {
+        if (!SystemInfo.isWindows) return
+        try {
+            val dir = File(System.getProperty("user.home"), WATCHER_DIR)
+            if (!dir.exists()) dir.mkdirs()
+            File(dir, "notify.ps1").writeText(PS_SCRIPT)
+            log.info("[TWatcher] PowerShell notify script written for Windows hooks")
+        } catch (e: Exception) {
+            log.warn("[TWatcher] Failed to write PowerShell notify script", e)
+        }
+    }
 
     /**
      * v3 routing — INTELLIJ_TERMINAL_WATCHER_* env vars (injected by
@@ -53,6 +110,9 @@ object HookConfigHelper {
     }
 
     fun setupAllHooks(projectBasePath: String?) {
+        // Windows hook이 참조할 PowerShell script를 먼저 생성
+        writePsScriptIfWindows()
+
         // 글로벌 설정 (모든 프로젝트에서 작동)
         setupClaudeHookGlobal()
         setupGeminiHookGlobal()
@@ -73,7 +133,7 @@ object HookConfigHelper {
             put("hooks", buildJsonArray {
                 add(buildJsonObject {
                     put("type", "command")
-                    put("command", curlCmd("claude"))
+                    put("command", hookCmd("claude"))
                     put("timeout", 5)
                 })
             })
@@ -86,7 +146,7 @@ object HookConfigHelper {
             put("hooks", buildJsonArray {
                 add(buildJsonObject {
                     put("type", "command")
-                    put("command", curlCmd("claude"))
+                    put("command", hookCmd("claude"))
                     put("timeout", 5)
                 })
             })
@@ -102,7 +162,7 @@ object HookConfigHelper {
                 add(buildJsonObject {
                     put("name", "intellij-terminal-watcher")
                     put("type", "command")
-                    put("command", curlCmd("gemini"))
+                    put("command", hookCmd("gemini"))
                     put("timeout", 5000)
                 })
             })
@@ -168,11 +228,20 @@ object HookConfigHelper {
 
             val hooksStr = root["hooks"]?.toString().orEmpty()
             val hasStaleConfig = hooksStr.contains("..terminal-watcher") || hooksStr.contains("19876")
-            val hasCorrectHooks = hooksStr.contains("terminal-watcher") &&
-                hooksStr.contains("JetBrains-JediTerm") &&
-                hooksStr.contains("shell_pid") &&
-                hooksStr.contains("INTELLIJ_TERMINAL_WATCHER_PORT") &&
-                !hasStaleConfig
+            // Windows hook command is `powershell ... -File "...notify.ps1" <tool>` — the bash-only
+            // markers (JetBrains-JediTerm / shell_pid / env var name) live inside notify.ps1, not the
+            // settings.json command. So Windows is detected by the notify.ps1 reference.
+            val hasCorrectHooks = if (SystemInfo.isWindows) {
+                hooksStr.contains("terminal-watcher") &&
+                    hooksStr.contains("notify.ps1") &&
+                    !hasStaleConfig
+            } else {
+                hooksStr.contains("terminal-watcher") &&
+                    hooksStr.contains("JetBrains-JediTerm") &&
+                    hooksStr.contains("shell_pid") &&
+                    hooksStr.contains("INTELLIJ_TERMINAL_WATCHER_PORT") &&
+                    !hasStaleConfig
+            }
 
             if (hasCorrectHooks) {
                 log.info("[TWatcher] $label hooks already configured")
@@ -202,6 +271,11 @@ object HookConfigHelper {
         val codexDir = File(System.getProperty("user.home"), ".codex")
         if (!codexDir.exists()) {
             log.info("[TWatcher] ~/.codex/ directory not found, skipping Codex hook setup")
+            return
+        }
+
+        if (SystemInfo.isWindows) {
+            setupCodexHookWindows(codexDir)
             return
         }
 
@@ -284,6 +358,47 @@ object HookConfigHelper {
             }
         } catch (e: Exception) {
             log.warn("[TWatcher] Failed to setup Codex hooks", e)
+        }
+    }
+
+    // ── Codex: Windows (powershell + notify.ps1, no bash/node) ──
+
+    private fun setupCodexHookWindows(codexDir: File) {
+        try {
+            val configFile = File(codexDir, "config.toml")
+            val content = if (configFile.exists()) configFile.readText() else ""
+            // toml 문자열용 백슬래시 이스케이프
+            val scriptPath = psScriptPath().replace("\\", "\\\\")
+            var cleaned = content
+            var modified = false
+
+            if (!content.contains("# Terminal Watcher notify v3 (powershell)")) {
+                cleaned = content
+                    .replace(Regex("""(?m)^# Terminal Watcher.*notify.*$\n?"""), "")
+                    .replace(Regex("""(?m)^notify\s*=\s*\[[^\]]*\]\s*$\n?"""), "")
+                    .trimEnd()
+                val lines = cleaned.lines().toMutableList()
+                lines.add(0, "notify = [\"powershell\", \"-NoProfile\", \"-ExecutionPolicy\", \"Bypass\", \"-File\", \"$scriptPath\", \"codex\"]")
+                lines.add(0, "# Terminal Watcher notify v3 (powershell)")
+                cleaned = lines.joinToString("\n")
+                modified = true
+            }
+
+            if (!cleaned.contains("[tui]")) {
+                cleaned = cleaned.trimEnd() + "\n\n[tui]\n" +
+                    "notifications = [\"approval-requested\"]\n" +
+                    "notification_method = \"bel\"\n"
+                modified = true
+            }
+
+            if (modified) {
+                configFile.writeText(cleaned)
+                log.info("[TWatcher] Codex (Windows/powershell) hooks configured in ${configFile.absolutePath}")
+            } else {
+                log.info("[TWatcher] Codex hooks already configured")
+            }
+        } catch (e: Exception) {
+            log.warn("[TWatcher] Failed to setup Codex hooks (Windows)", e)
         }
     }
 }
