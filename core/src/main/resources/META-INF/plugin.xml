@@ -6,6 +6,9 @@
     <description><![CDATA[
         Monitors Android Studio's built-in terminal for AI CLI tool events
         (Claude Code, Codex, Gemini CLI) and sends IDE notifications with system sounds.
+        <br/><br/>
+        <b>macOS:</b> To receive system notification banners, allow notifications for your
+        IDE in System Settings &rarr; Notifications. (In-IDE balloon notifications work without this.)
     ]]></description>
 
     <change-notes><![CDATA[
