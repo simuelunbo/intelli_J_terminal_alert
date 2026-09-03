@@ -78,9 +78,17 @@ src/main/kotlin/com/terminalwatcher/
 
 ## Building
 
+The build compiles against a locally installed IDE (Android Studio) as the IntelliJ Platform.
+It is auto-detected from the default install location on macOS, Windows and Linux;
+if none is found, Android Studio `platformFallbackVersion` (see `gradle.properties`) is downloaded instead.
+
 ```bash
 ./gradlew buildPlugin
-# Output: build/distributions/android-studio-terminal-alert-<version>.zip
+# Output: core/build/distributions/core-<version>.zip
+
+# Use a specific IDE install (Windows/Linux: install root, macOS: *.app/Contents)
+./gradlew buildPlugin -PideLocalPath="C:/Program Files/Android/Android Studio"
+# or: export TERMINAL_ALERT_IDE_HOME="/Applications/Android Studio.app/Contents"
 ```
 
 ## License
