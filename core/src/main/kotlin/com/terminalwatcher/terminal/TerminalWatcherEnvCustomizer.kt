@@ -6,7 +6,8 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindowManager
 import com.terminalwatcher.hook.HookHttpServer
-import org.jetbrains.plugins.terminal.LocalTerminalCustomizer
+import org.jetbrains.plugins.terminal.startup.MutableShellExecOptions
+import org.jetbrains.plugins.terminal.startup.ShellExecOptionsCustomizer
 import java.util.UUID
 
 /**
@@ -16,21 +17,21 @@ import java.util.UUID
  * tab/project exactly — without relying on PPID-walking or cwd heuristics.
  *
  * Mirrors cmux's `CMUX_SURFACE_ID` / `CMUX_WORKSPACE_ID` injection pattern.
+ *
+ * Implements [ShellExecOptionsCustomizer] (2026.1+, sinceBuild 261) — the
+ * platform's designated replacement for the deprecated `LocalTerminalCustomizer`,
+ * so the plugin carries no deprecated-API references. The interface is still
+ * `ApiStatus.Experimental` as of 262; accepted, since it is the only
+ * non-deprecated env-injection point and `LocalTerminalDirectRunner` invokes it
+ * on the same startup path for both classic and reworked terminals.
  */
-class TerminalWatcherEnvCustomizer : LocalTerminalCustomizer() {
+class TerminalWatcherEnvCustomizer : ShellExecOptionsCustomizer {
 
     private val log = Logger.getInstance(TerminalWatcherEnvCustomizer::class.java)
 
-    // Override the (Project, String, String[], Map) overload — it stays the
-    // stable contract across sinceBuild=243+ shipping IDEs. The newer List+EelDescriptor
-    // form is for remote shells via Eel and isn't required for local PTYs.
-    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
-    override fun customizeCommandAndEnvironment(
-        project: Project,
-        workingDirectory: String?,
-        command: Array<out String>,
-        envs: MutableMap<String, String>,
-    ): Array<out String> {
+    // The EP contract is @RequiresBackgroundThread, so blocking briefly in
+    // awaitReady() below is legal here.
+    override fun customizeExecOptions(project: Project, shellExecOptions: MutableShellExecOptions) {
         try {
             val tabId = UUID.randomUUID().toString()
             val projectId = project.locationHash
@@ -41,11 +42,14 @@ class TerminalWatcherEnvCustomizer : LocalTerminalCustomizer() {
             // and inject port=0, leaving curl to dial http://127.0.0.1:0/... and fail.
             hookServer?.awaitReady()
             val port = hookServer?.actualPort ?: 0
-            val cwd = workingDirectory ?: project.basePath ?: ""
+            // basePath, not the tab's working directory: cwd only feeds the
+            // notification fallback title, and reading the tab cwd would pull the
+            // experimental EelPath API into our bytecode for no routing benefit.
+            val cwd = project.basePath ?: ""
 
-            envs[ENV_TAB_ID] = tabId
-            envs[ENV_PROJECT_ID] = projectId
-            if (port > 0) envs[ENV_PORT] = port.toString()
+            shellExecOptions.setEnvironmentVariable(ENV_TAB_ID, tabId)
+            shellExecOptions.setEnvironmentVariable(ENV_PROJECT_ID, projectId)
+            if (port > 0) shellExecOptions.setEnvironmentVariable(ENV_PORT, port.toString())
 
             ApplicationManager.getApplication()
                 .getService(TabRegistry::class.java)
@@ -61,7 +65,6 @@ class TerminalWatcherEnvCustomizer : LocalTerminalCustomizer() {
         } catch (t: Throwable) {
             log.warn("[TWatcher] Customizer failed (terminal will still launch)", t)
         }
-        return command
     }
 
     private fun scheduleSelfBind(project: Project, tabId: String) {

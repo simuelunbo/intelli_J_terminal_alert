@@ -46,6 +46,7 @@ tasks {
     }
 
     patchPluginXml {
-        sinceBuild.set("243")
+        // ShellExecOptionsCustomizer (our env-injection EP) only exists from 2026.1.
+        sinceBuild.set("261")
     }
 }
