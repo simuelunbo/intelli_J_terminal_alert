@@ -37,8 +37,13 @@ object HookConfigHelper {
     /**
      * Windows notify script. Routes via INTELLIJ_TERMINAL_WATCHER_* env vars (no PPID-walk — Windows
      * has no `ps`). Claude/Gemini pass the payload on stdin; Codex passes it as the last argv.
-     * Body is piped to curl.exe stdin (`--data-binary '@-'`) to dodge PowerShell 5.1's external-exe
-     * argument-quoting bug. Errors are swallowed so the hook never blocks the shell.
+     * The payload is handled as raw UTF-8 bytes end to end: PowerShell 5.1 decodes stdin with the
+     * console codepage (e.g. CP949) and re-encodes anything piped to a native exe with
+     * `$OutputEncoding` (ASCII by default) — both turn Hangul and other non-ASCII text into '?'.
+     * Writing the bytes to a temp file and sending it with `--data-binary @file` bypasses both, and a
+     * quote-free file path also dodges PowerShell 5.1's external-exe argument-quoting bug.
+     * Errors are swallowed so the hook never blocks the shell.
+     * Keep this script ASCII-only: it is written without a BOM, which PowerShell 5.1 reads as ANSI.
      */
     private val PS_SCRIPT = """
         |if (${'$'}env:TERMINAL_EMULATOR -ne 'JetBrains-JediTerm') { exit 0 }
@@ -48,15 +53,30 @@ object HookConfigHelper {
         |${'$'}uri = "http://127.0.0.1:${'$'}port/event?tool=${'$'}tool&shell_pid=${'$'}PID"
         |${'$'}tab = ${'$'}env:INTELLIJ_TERMINAL_WATCHER_TAB_ID
         |${'$'}proj = ${'$'}env:INTELLIJ_TERMINAL_WATCHER_PROJECT_ID
-        |${'$'}payload = if (${'$'}args.Count -ge 2 -and ${'$'}args[1]) { ${'$'}args[1] } else { [Console]::In.ReadToEnd() }
-        |if (-not ${'$'}payload) { ${'$'}payload = '{}' }
+        |# Payload must stay raw UTF-8 bytes: PS 5.1 decodes stdin with the console codepage and
+        |# re-encodes pipes to native exes with ${'$'}OutputEncoding (ASCII), which turns Hangul into '?'.
+        |# Codex passes JSON as argv (UTF-16 -> encode UTF-8); Claude/Gemini pipe UTF-8 bytes on stdin.
+        |${'$'}bytes = if (${'$'}args.Count -ge 2 -and ${'$'}args[1]) {
+        |  [Text.Encoding]::UTF8.GetBytes([string]${'$'}args[1])
+        |} else {
+        |  ${'$'}stdin = [Console]::OpenStandardInput()
+        |  ${'$'}ms = New-Object IO.MemoryStream
+        |  ${'$'}stdin.CopyTo(${'$'}ms)
+        |  ${'$'}ms.ToArray()
+        |}
+        |if (-not ${'$'}bytes -or ${'$'}bytes.Length -eq 0) { ${'$'}bytes = [Text.Encoding]::UTF8.GetBytes('{}') }
+        |${'$'}tmp = ${'$'}null
         |try {
-        |  ${'$'}payload | & curl.exe -s -X POST ${'$'}uri `
-        |    -H "Content-Type: application/json" `
+        |  ${'$'}tmp = [IO.Path]::GetTempFileName()
+        |  [IO.File]::WriteAllBytes(${'$'}tmp, ${'$'}bytes)
+        |  & curl.exe -s -X POST ${'$'}uri `
+        |    -H "Content-Type: application/json; charset=utf-8" `
         |    -H "X-TWatcher-Tab-Id: ${'$'}tab" `
         |    -H "X-TWatcher-Project-Id: ${'$'}proj" `
-        |    --data-binary '@-' | Out-Null
-        |} catch {}
+        |    --data-binary "@${'$'}tmp" | Out-Null
+        |} catch {} finally {
+        |  if (${'$'}tmp) { Remove-Item -LiteralPath ${'$'}tmp -Force -ErrorAction SilentlyContinue }
+        |}
     """.trimMargin() + "\n"
 
     private fun writePsScriptIfWindows() {
@@ -285,13 +305,14 @@ object HookConfigHelper {
             val hasCorrectScript = scriptContent.contains("terminal-watcher") &&
                 scriptContent.contains("JetBrains-JediTerm") &&
                 scriptContent.contains("shell_pid") &&
-                scriptContent.contains("INTELLIJ_TERMINAL_WATCHER_PORT")
+                scriptContent.contains("INTELLIJ_TERMINAL_WATCHER_PORT") &&
+                scriptContent.contains("notify v4")
 
             if (!hasCorrectScript) {
                 scriptFile.writeText(
                     """
                     |#!/bin/bash
-                    |# terminal-watcher notify v3 — env-var routing with PPID fallback
+                    |# terminal-watcher notify v4 — env-var routing, PPID fallback, stdin payload fallback
                     |[ "${'$'}TERMINAL_EMULATOR" != "JetBrains-JediTerm" ] && exit 0
                     |TAB="${'$'}{INTELLIJ_TERMINAL_WATCHER_TAB_ID:-}"
                     |PROJ="${'$'}{INTELLIJ_TERMINAL_WATCHER_PROJECT_ID:-}"
@@ -312,11 +333,14 @@ object HookConfigHelper {
                     |  done
                     |fi
                     |[ -z "${'$'}PORT" ] && exit 0
+                    |PAYLOAD="${'$'}1"
+                    |if [ -z "${'$'}PAYLOAD" ] && [ ! -t 0 ]; then PAYLOAD=${'$'}(cat); fi
+                    |[ -z "${'$'}PAYLOAD" ] && PAYLOAD='{}'
                     |curl -s -X POST "http://127.0.0.1:${'$'}PORT/event?tool=codex&shell_pid=${'$'}SHELL_PID" \
                     |  -H 'Content-Type: application/json' \
                     |  -H "X-TWatcher-Tab-Id: ${'$'}TAB" \
                     |  -H "X-TWatcher-Project-Id: ${'$'}PROJ" \
-                    |  -d "${'$'}1"
+                    |  -d "${'$'}PAYLOAD"
                     """.trimMargin() + "\n",
                 )
                 scriptFile.setExecutable(true)
@@ -328,25 +352,29 @@ object HookConfigHelper {
             var modified = false
 
             var cleanedContent = content
-            if (!content.contains("# Terminal Watcher notify v2")) {
-                cleanedContent = content
-                    .replace(Regex("""(?m)^# Terminal Watcher.*notify.*$\n?"""), "")
-                    .replace(Regex("""(?m)^# Added by Terminal AI Watcher plugin$\n?"""), "")
-                    .replace(Regex("""(?m)^notify\s*=\s*\[[^\]]*\]\s*$\n?"""), "")
-                    .replace(Regex("""(?m)^notify\s*=\s*"[^"]*notify-twatcher[^"]*"\s*$\n?"""), "")
-                    .trimEnd()
-
-                val lines = cleanedContent.lines().toMutableList()
-                lines.add(0, "notify = [\"${scriptFile.absolutePath}\"]")
-                lines.add(0, "# Terminal Watcher notify v2")
-                cleanedContent = lines.joinToString("\n")
+            val upserted = CodexNotifyToml.upsertNotify(
+                content,
+                scriptMarker = "notify-twatcher",
+                headerComment = "# Terminal Watcher notify v2",
+                notifyLine = "notify = [\"${scriptFile.absolutePath}\"]",
+            )
+            if (upserted != null) {
+                cleanedContent = upserted
                 modified = true
             }
 
-            if (!cleanedContent.contains("[tui]")) {
-                cleanedContent = cleanedContent.trimEnd() + "\n\n[tui]\n" +
-                    "notifications = [\"approval-requested\"]\n" +
-                    "notification_method = \"bel\"\n"
+            val hookBlock = """
+                |[[hooks.PermissionRequest]]
+                |
+                |[[hooks.PermissionRequest.hooks]]
+                |type = "command"
+                |command = '${scriptFile.absolutePath}'
+                |timeout = 5
+                |statusMessage = "Terminal Watcher notification"
+            """.trimMargin()
+            val withHook = CodexNotifyToml.ensurePermissionRequestHook(cleanedContent, "notify-twatcher", hookBlock)
+            if (withHook != null) {
+                cleanedContent = withHook
                 modified = true
             }
 
@@ -372,22 +400,29 @@ object HookConfigHelper {
             var cleaned = content
             var modified = false
 
-            if (!content.contains("# Terminal Watcher notify v3 (powershell)")) {
-                cleaned = content
-                    .replace(Regex("""(?m)^# Terminal Watcher.*notify.*$\n?"""), "")
-                    .replace(Regex("""(?m)^notify\s*=\s*\[[^\]]*\]\s*$\n?"""), "")
-                    .trimEnd()
-                val lines = cleaned.lines().toMutableList()
-                lines.add(0, "notify = [\"powershell\", \"-NoProfile\", \"-ExecutionPolicy\", \"Bypass\", \"-File\", \"$scriptPath\", \"codex\"]")
-                lines.add(0, "# Terminal Watcher notify v3 (powershell)")
-                cleaned = lines.joinToString("\n")
+            val upserted = CodexNotifyToml.upsertNotify(
+                content,
+                scriptMarker = "notify.ps1",
+                headerComment = "# Terminal Watcher notify v3 (powershell)",
+                notifyLine = "notify = [\"powershell\", \"-NoProfile\", \"-ExecutionPolicy\", \"Bypass\", \"-File\", \"$scriptPath\", \"codex\"]",
+            )
+            if (upserted != null) {
+                cleaned = upserted
                 modified = true
             }
 
-            if (!cleaned.contains("[tui]")) {
-                cleaned = cleaned.trimEnd() + "\n\n[tui]\n" +
-                    "notifications = [\"approval-requested\"]\n" +
-                    "notification_method = \"bel\"\n"
+            val hookBlock = """
+                |[[hooks.PermissionRequest]]
+                |
+                |[[hooks.PermissionRequest.hooks]]
+                |type = "command"
+                |command = 'powershell -NoProfile -ExecutionPolicy Bypass -File "${psScriptPath()}" codex'
+                |timeout = 5
+                |statusMessage = "Terminal Watcher notification"
+            """.trimMargin()
+            val withHook = CodexNotifyToml.ensurePermissionRequestHook(cleaned, "notify.ps1", hookBlock)
+            if (withHook != null) {
+                cleaned = withHook
                 modified = true
             }
 

@@ -12,14 +12,11 @@
     ]]></description>
 
     <change-notes><![CDATA[
-        <h2>1.2.0</h2>
+        <h2>1.2.1</h2>
         <ul>
-            <li><b>New:</b> Windows 10/11 support — native notifications, taskbar attention, and sound playback</li>
-            <li><b>New:</b> Per-tab notification routing — alerts are accurately attributed to the originating terminal tab, even when multiple tabs or IDE windows are open</li>
-            <li><b>New:</b> OS-aware settings UI — labels, sound options, and defaults adapt to the current operating system</li>
-            <li><b>Improve:</b> Notification readability — project and tab info shown as a separate subtitle line</li>
-            <li><b>Improve:</b> Hook configurations migrate automatically when upgrading from older versions</li>
-            <li><b>Improve:</b> Marketplace verifier friendly — no external native library dependencies</li>
+            <li><b>New:</b> Codex approval requests now show a "Permission Required" notification, like Claude Code</li>
+            <li><b>Fix:</b> Windows &mdash; Korean and other non-ASCII text in notifications no longer appears as "?"</li>
+            <li><b>Fix:</b> Codex CLI could fail to start after its settings were updated by both Codex and this plugin; the plugin now edits the Codex config safely and repairs the broken state</li>
         </ul>
     ]]></change-notes>
 

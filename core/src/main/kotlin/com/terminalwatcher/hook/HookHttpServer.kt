@@ -193,7 +193,7 @@ class HookHttpServer(
             }
 
             val eventType = when (payload.hookEventName) {
-                "Notification" -> HookEventType.PERMISSION
+                "Notification", "PermissionRequest" -> HookEventType.PERMISSION
                 "Stop", "AfterAgent", "SessionEnd" -> HookEventType.COMPLETE
                 else -> HookEventType.COMPLETE
             }
@@ -203,6 +203,7 @@ class HookHttpServer(
                 ?: payload.lastAssistantMessage
                 ?: payload.lastAssistantMessageAlt
                 ?: payload.promptResponse
+                ?: payload.toolName?.let { "Approval requested: $it" }
 
             // Prefer exact tab match via TabRegistry when tabId came through env.
             // Falls back to the legacy heuristic chain otherwise — preserving

@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "com.terminalwatcher"
-version = "1.2.0"
+version = "1.2.1"
 
 repositories {
     mavenCentral()
@@ -15,9 +15,14 @@ repositories {
     }
 }
 
+// 루트 build.gradle.kts 에서 결정 (로컬 IDE 경로 or null)
+val ideLocalPath: String? by rootProject.extra
+val platformFallbackVersion: String by rootProject.extra
+
 dependencies {
     intellijPlatform {
-        local("/Applications/Android Studio.app/Contents")
+        val ideHome = ideLocalPath
+        if (ideHome != null) local(ideHome) else androidStudio(platformFallbackVersion)
         bundledPlugin("org.jetbrains.plugins.terminal")
         pluginModule(implementation(project(":compose-ui")))
     }

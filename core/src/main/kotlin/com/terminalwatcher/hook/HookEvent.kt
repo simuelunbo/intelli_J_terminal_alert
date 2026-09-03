@@ -38,4 +38,5 @@ data class HookPayload(
     @SerialName("last-assistant-message") val lastAssistantMessageAlt: String? = null,
     @SerialName("prompt_response") val promptResponse: String? = null,
     @SerialName("permission_mode") val permissionMode: String? = null,
+    @SerialName("tool_name") val toolName: String? = null,
 )
