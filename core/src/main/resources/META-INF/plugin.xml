@@ -14,7 +14,7 @@
     <change-notes><![CDATA[
         <h2>1.2.1</h2>
         <ul>
-            <li><b>New:</b> Codex approval requests now show a "Permission Required" notification, like Claude Code</li>
+            <li><b>Fix:</b> Codex approval requests had stopped showing the "Permission Required" notification; these alerts now appear again, like Claude Code</li>
             <li><b>Improve:</b> Updated to the IDE's current terminal integration; now requires 2026.1 or newer</li>
             <li><b>Fix:</b> Windows &mdash; Korean and other non-ASCII text in notifications no longer appears as "?"</li>
             <li><b>Fix:</b> Codex CLI could fail to start after its settings were updated by both Codex and this plugin; the plugin now edits the Codex config safely and repairs the broken state</li>
