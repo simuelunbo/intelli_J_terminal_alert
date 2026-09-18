@@ -12,12 +12,13 @@
     ]]></description>
 
     <change-notes><![CDATA[
-        <h2>1.2.1</h2>
+        <h2>1.2.2</h2>
         <ul>
-            <li><b>Fix:</b> Codex approval requests had stopped showing the "Permission Required" notification; these alerts now appear again, like Claude Code</li>
-            <li><b>Improve:</b> Updated to the IDE's current terminal integration; now requires 2026.1 or newer</li>
-            <li><b>Fix:</b> Windows &mdash; Korean and other non-ASCII text in notifications no longer appears as "?"</li>
-            <li><b>Fix:</b> Codex CLI could fail to start after its settings were updated by both Codex and this plugin; the plugin now edits the Codex config safely and repairs the broken state</li>
+            <li><b>New:</b> Open the originating terminal tab using the "Go to terminal tab" link in IDE notifications. Clicking a Windows system notification, or returning to the IDE shortly after an alert on macOS and Linux, also switches to the terminal. This behavior can be turned off under Notification Channels.</li>
+            <li><b>Improve:</b> More reliable terminal tab names and navigation to the originating project window when several IDE windows are open.</li>
+            <li><b>Fix:</b> Removed duplicate Codex approval notification registrations left by earlier automatic setup and restored missing Claude Code approval and completion handlers while preserving other integrations. Consecutive approval requests are no longer suppressed by the notification cooldown.</li>
+            <li><b>Fix:</b> On Windows, an unavailable notification sound now falls back to an installed Windows sound, including when the saved setting still refers to a macOS sound.</li>
+            <li><b>Improve:</b> Updated terminal integration for newer IDE releases, with compatibility verified on Android Studio 2026.1 and IntelliJ IDEA 2026.3 EAP.</li>
         </ul>
     ]]></change-notes>
 
@@ -35,6 +36,8 @@
             serviceImplementation="com.terminalwatcher.settings.SettingsState"/>
         <applicationService
             serviceImplementation="com.terminalwatcher.hook.HookHttpServer"/>
+        <applicationService
+            serviceImplementation="com.terminalwatcher.notify.PendingFocusService"/>
         <applicationService
             serviceImplementation="com.terminalwatcher.mac.MacNotifier"/>
         <applicationService

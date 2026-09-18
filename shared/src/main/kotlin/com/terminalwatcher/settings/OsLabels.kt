@@ -29,6 +29,7 @@ package com.terminalwatcher.settings
 data class OsLabels(
     val badgeLabel: String,
     val systemNotificationLabel: String,
+    val focusTerminalLabel: String,
     val soundList: List<String>,
     val soundDir: String,
     val soundExtension: String,
@@ -42,6 +43,10 @@ data class OsLabels(
         val MAC = OsLabels(
             badgeLabel = "Dock badge count",
             systemNotificationLabel = "macOS system notification",
+            // macOS reports no notification click, so the jump is triggered by the
+            // IDE regaining focus soon after a banner appeared. Worded so the user
+            // understands why an unrelated app switch can also move the tab.
+            focusTerminalLabel = "Go to the alerting terminal tab when the IDE regains focus",
             soundList = listOf(
                 "Glass", "Pop", "Ping", "Purr", "Blow", "Bottle",
                 "Frog", "Hero", "Submarine", "Morse", "Tink",
@@ -55,6 +60,9 @@ data class OsLabels(
         val WINDOWS = OsLabels(
             badgeLabel = "Taskbar attention (flash)",
             systemNotificationLabel = "Windows system notification",
+            // Windows delivers a real click event from the tray toast, so no wording
+            // about focus timing is needed here.
+            focusTerminalLabel = "Go to the alerting terminal tab when the notification is clicked",
             soundList = listOf(
                 "chimes", "chord", "ding", "notify", "tada",
                 "Alarm01", "Alarm02", "Alarm03", "Ring01", "Ring02",
@@ -69,6 +77,7 @@ data class OsLabels(
         val LINUX = OsLabels(
             badgeLabel = "Window attention",
             systemNotificationLabel = "System notification",
+            focusTerminalLabel = "Go to the alerting terminal tab when the IDE regains focus",
             soundList = emptyList(),
             soundDir = "/usr/share/sounds/",
             soundExtension = ".wav",

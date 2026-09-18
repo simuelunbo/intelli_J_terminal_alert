@@ -1,6 +1,10 @@
 package com.terminalwatcher.notify
 
+import com.intellij.notification.Notification
+import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationType
+import com.terminalwatcher.settings.SettingsState
+import com.terminalwatcher.terminal.TerminalFocuser
 
 /**
  * OS-agnostic abstraction over notification channels (IDE balloon, system
@@ -52,6 +56,27 @@ interface Notifier {
     fun resetBadge()
 
     companion object {
+        /** Label of the balloon action link that jumps to the originating terminal tab. */
+        const val FOCUS_ACTION_TEXT = "Go to terminal tab"
+
+        /**
+         * Adds the "go to terminal tab" link to an IDE balloon.
+         *
+         * This is the one notification channel with a real click callback on every
+         * OS, so it needs no inference: the action closes over the resolved tab and
+         * hands it straight to [TerminalFocuser]. System notifications have no such
+         * callback and go through [PendingFocusService] instead.
+         */
+        fun attachFocusAction(notification: Notification, context: NotificationContext?) {
+            if (!SettingsState.getInstance().state.focusTerminalOnClick) return
+            if (context == null || (context.tabId == null && context.tabName == null)) return
+            notification.addAction(
+                NotificationAction.createSimpleExpiring(FOCUS_ACTION_TEXT) {
+                    TerminalFocuser.focus(context.projectId, context.tabId, context.tabName)
+                },
+            )
+        }
+
         /** Standardized `[project/tab] ` prefix used by the default overload + by Notifiers that want consistent formatting. */
         fun buildLocationTag(context: NotificationContext?): String {
             val project = context?.projectName.orEmpty()

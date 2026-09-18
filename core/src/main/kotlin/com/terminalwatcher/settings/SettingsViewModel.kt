@@ -31,6 +31,8 @@ class SettingsViewModel {
                 _uiState.update { it.copy(enableSystemNotification = action.enabled) }
             is SettingsAction.ToggleIdeBalloon ->
                 _uiState.update { it.copy(enableIdeBalloon = action.enabled) }
+            is SettingsAction.ToggleFocusTerminal ->
+                _uiState.update { it.copy(focusTerminalOnClick = action.enabled) }
             is SettingsAction.ToggleSound ->
                 _uiState.update { it.copy(enableSound = action.enabled) }
             is SettingsAction.SelectSound ->
@@ -77,6 +79,7 @@ class SettingsViewModel {
             enableSystemNotification = data.enableSystemNotification,
             enableIdeBalloon = data.enableIdeBalloon,
             enableSound = data.enableSound,
+            focusTerminalOnClick = data.focusTerminalOnClick,
             soundName = resolvedSoundName,
             customSoundPath = data.customSoundPath.orEmpty(),
             enableClaudeCode = data.enableClaudeCode,
@@ -95,6 +98,7 @@ class SettingsViewModel {
         data.enableSystemNotification = ui.enableSystemNotification
         data.enableIdeBalloon = ui.enableIdeBalloon
         data.enableSound = ui.enableSound
+        data.focusTerminalOnClick = ui.focusTerminalOnClick
         data.soundName = ui.soundName
         data.customSoundPath = ui.customSoundPath
         data.enableClaudeCode = ui.enableClaudeCode

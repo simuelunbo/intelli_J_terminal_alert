@@ -16,7 +16,7 @@ IntelliJ Platform plugin that monitors AI CLI tools (Claude Code, Codex, Gemini 
 | Tool | Completion | Permission Prompt |
 |------|:----------:|:-----------------:|
 | **Claude Code** | Stop hook | Notification hook (permission_prompt) |
-| **Codex** | notify hook (agent-turn-complete) | tui.notifications (terminal bell) |
+| **Codex** | notify hook (agent-turn-complete) | PermissionRequest hook in `~/.codex/hooks.json` |
 | **Gemini CLI** | AfterAgent hook | Notification hook |
 
 ## How It Works
@@ -30,7 +30,7 @@ Claude Code / Codex / Gemini CLI
 ```
 
 1. Plugin starts an HTTP server on a dynamic port inside the IDE process
-2. Auto-configures hook settings for each CLI tool (`~/.claude/settings.json`, `~/.codex/config.toml`, `~/.gemini/settings.json`)
+2. Auto-configures hook settings for each CLI tool (`~/.claude/settings.json`, `~/.codex/config.toml` + `~/.codex/hooks.json`, `~/.gemini/settings.json`)
 3. When a CLI tool completes a task or needs permission, the hook sends a POST request
 4. Plugin displays IDE balloon notification + macOS Notification Center alert + plays sound
 5. Dock badge increments; resets when IDE gains focus
@@ -40,7 +40,15 @@ Claude Code / Codex / Gemini CLI
 1. Download the latest release ZIP
 2. In your IDE: **Settings** → **Plugins** → **⚙️** → **Install Plugin from Disk**
 3. Select the ZIP file and restart the IDE
-4. Hooks are auto-configured on first run — no manual setup needed
+4. Hooks are auto-configured on first run. In Codex, review any new hook in `/hooks` before it can run.
+
+Codex permission hooks use `hooks.json`; the plugin migrates its unchanged legacy TOML block and preserves other tools' hooks, trust records, and completion notification wrappers. Configuration backups use the `.terminal-watcher.bak` suffix. Customized legacy blocks are preserved and reported in the IDE log instead of adding a duplicate.
+
+Claude hooks are registered in user settings only. Missing approval or completion handlers are added independently; other handlers, events, and settings are preserved. Changes keep a `.terminal-watcher.bak` copy and use atomic replacement after checking for intervening edits. Existing project settings are left intact, and new shared project settings are not created. Invalid settings or customized matchers for the same command are preserved and reported in the IDE log.
+
+Claude approval alerts retain `Notification/permission_prompt`: terminal notifications arrive after about six seconds without typing, including sandbox network approvals. This is not an immediate `PermissionRequest` alert. See the [Claude hook reference](https://code.claude.com/docs/en/hooks#notification).
+
+Permission requests bypass completion notification throttling, including consecutive requests with identical text. Windows sound playback resolves a missing default (including the macOS `Glass` default) to an available Windows sound without requiring a settings save. System banners still follow the IDE's foreground/background notification policy; IDE balloons are a separate channel.
 
 ## Settings
 
@@ -52,7 +60,7 @@ Claude Code / Codex / Gemini CLI
 
 ## Requirements
 
-- Android Studio 2024.3+ or IntelliJ IDEA 2024.3+ (build 243+)
+- Android Studio or IntelliJ IDEA 2026.1+ (build 261+)
 - macOS (for system notifications and sound)
 - CLI tools installed: [Claude Code](https://claude.ai/code), [Codex](https://openai.com/codex), [Gemini CLI](https://ai.google.dev/gemini-api/docs/gemini-cli)
 
@@ -78,6 +86,8 @@ src/main/kotlin/com/terminalwatcher/
 
 ## Building
 
+The core module emits Java 21 bytecode and defaults to a Java 21 toolchain. If only a newer JDK is installed, select it with `-PbuildJavaVersion=25` (for JDK 25); Java and Kotlin output still target Java 21.
+
 The build compiles against a locally installed IDE (Android Studio) as the IntelliJ Platform.
 It is auto-detected from the default install location on macOS, Windows and Linux;
 if none is found, Android Studio `platformFallbackVersion` (see `gradle.properties`) is downloaded instead.
@@ -90,6 +100,23 @@ if none is found, Android Studio `platformFallbackVersion` (see `gradle.properti
 ./gradlew buildPlugin -PideLocalPath="C:/Program Files/Android/Android Studio"
 # or: export TERMINAL_ALERT_IDE_HOME="/Applications/Android Studio.app/Contents"
 ```
+
+## Compatibility verification
+
+```bash
+# Verify the ZIP against the build IDE (no extra IDE download when using a local installation).
+./gradlew :core:verifyPlugin
+
+# Also verify a specific IntelliJ IDEA EAP build; downloads that IDE if needed.
+./gradlew :core:verifyPlugin "-PverificationIdeVersion=263.4732.28"
+
+# Override the local verification IDE without changing the compilation IDE.
+./gradlew :core:verifyPlugin -PverificationIdePath="/path/to/IDE"
+```
+
+Reports are written to `core/build/reports/pluginVerifier`. Verification is an explicit task, not added to every test run. Experimental API findings remain visible.
+
+The Java `TerminalWatcherEnvCustomizer` is the only production class that imports the experimental shell-start types. It inherits the IDE's default working-directory method without a Kotlin compatibility bridge. Kotlin setup receives a standard environment setter callback and retains port readiness, tab registration, and focus binding. The required shell-start API remains experimental; this boundary reduces unnecessary references and isolates future API changes, but does not guarantee compatibility with future IDEs.
 
 ## License
 

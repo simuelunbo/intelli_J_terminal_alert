@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "com.terminalwatcher"
-version = "1.2.1"
+version = "1.2.2"
 
 repositories {
     mavenCentral()
@@ -24,6 +24,7 @@ dependencies {
         val ideHome = ideLocalPath
         if (ideHome != null) local(ideHome) else androidStudio(platformFallbackVersion)
         bundledPlugin("org.jetbrains.plugins.terminal")
+        pluginVerifier()
         pluginModule(implementation(project(":compose-ui")))
     }
 
@@ -37,7 +38,35 @@ dependencies {
 }
 
 kotlin {
-    jvmToolchain(17)
+    // The terminal API in the minimum supported 2026.1 IDE is Java 21 bytecode.
+    // javac must be able to read it now that the extension adapter is Java.
+    jvmToolchain(providers.gradleProperty("buildJavaVersion").orElse("21").get().toInt())
+    compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+tasks.withType<JavaCompile>().configureEach {
+    options.release.set(21)
+}
+
+intellijPlatform {
+    pluginVerification {
+        ides {
+            val verificationIdePath = providers.gradleProperty("verificationIdePath").orNull ?: ideLocalPath
+            if (verificationIdePath != null) local(file(verificationIdePath)) else create("AI", platformFallbackVersion)
+            providers.gradleProperty("verificationIdeVersion").orNull?.let { create("IU", it) }
+        }
+    }
+}
+
+tasks.named<org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask>("verifyPlugin") {
+    // The verifier clears its extraction directory on startup. Keep other projects'
+    // verifier processes from deleting this task's in-use dependencies.
+    systemProperty("plugin.verifier.home.dir", layout.buildDirectory.dir("pluginVerifier-cache").get().asFile.absolutePath)
 }
 
 tasks {

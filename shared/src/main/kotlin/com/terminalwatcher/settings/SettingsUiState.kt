@@ -12,6 +12,7 @@ data class SettingsUiState(
     val enableSystemNotification: Boolean = true,
     val enableIdeBalloon: Boolean = true,
     val enableSound: Boolean = true,
+    val focusTerminalOnClick: Boolean = true,
     val soundName: String = "Glass",
     val customSoundPath: String = "",
     val enableClaudeCode: Boolean = true,
@@ -34,6 +35,7 @@ sealed interface SettingsAction {
     data class ToggleBadgeCount(val enabled: Boolean) : SettingsAction
     data class ToggleSystemNotification(val enabled: Boolean) : SettingsAction
     data class ToggleIdeBalloon(val enabled: Boolean) : SettingsAction
+    data class ToggleFocusTerminal(val enabled: Boolean) : SettingsAction
 
     // 사운드
     data class ToggleSound(val enabled: Boolean) : SettingsAction

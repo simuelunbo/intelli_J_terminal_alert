@@ -14,116 +14,103 @@ import java.awt.Component
 import java.awt.Container
 import java.util.concurrent.atomic.AtomicReference
 
+/**
+ * Finds which terminal tab a hook event came from, for events that carry no
+ * injected tabId — terminals that were already open when the plugin loaded.
+ *
+ * Strategies run strongest-first and stop at the first hit:
+ * 1. **Shell PID** — exact. [ShellPidResolver] turns the PID the hook reported
+ *    into the tab's shell PID by walking the OS process tree, and that is matched
+ *    against each tab's own shell process.
+ * 2. **cwd / single-tab / selected-tab** — guesses, kept as a last resort so a
+ *    notification still carries some location rather than none.
+ *
+ * Returns the [Content] object rather than a tab title. Titles are neither unique
+ * (the user can rename a tab, and a running CLI can set the title through an
+ * escape sequence) nor stable over the life of a tab.
+ */
 object TerminalTabTracker {
 
     private val log = Logger.getInstance(TerminalTabTracker::class.java)
 
-    fun getTabNameByShellPid(shellPid: Long?): String? {
-        if (shellPid == null) return null
-        return onEdt {
-            for (project in ProjectManager.getInstance().openProjects) {
-                val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("Terminal")
-                    ?: continue
-                for (content in toolWindow.contentManager.contents) {
-                    dumpContentDiagnostics(content)
-                    // Classic Terminal 경로
-                    val widget = resolveTerminalWidget(content)
-                    if (widget != null) {
-                        val conn = widget.ttyConnector as? ProcessTtyConnector
-                        if (conn != null) {
-                            val pid = runCatching { conn.process.pid() }.getOrNull()
-                            if (pid == shellPid) {
-                                log.info("[TWatcher] Matched tab '${content.displayName}' by shell_pid (classic)")
-                                return@onEdt content.displayName
-                            }
-                        }
-                    }
-                    // Reworked Terminal 경로 — TerminalViewImpl 로 PID 접근 시도
-                    val viewImpl = resolveReworkedView(content)
-                    if (viewImpl != null) {
-                        val pid = extractReworkedPid(viewImpl)
-                        log.info("[TWatcher] Tab '${content.displayName}' reworked-pid=$pid vs shell_pid=$shellPid")
-                        if (pid != null && pid == shellPid) {
-                            log.info("[TWatcher] Matched tab '${content.displayName}' by shell_pid (reworked)")
-                            return@onEdt content.displayName
-                        }
-                    }
+    private const val TERMINAL_TOOL_WINDOW_ID = "Terminal"
+
+    data class ResolvedTab(val project: Project, val content: Content)
+
+    /**
+     * @param shellPidCandidates the reported PID and its ancestors, from [ShellPidResolver].
+     * @param cwd the working directory reported in the hook payload.
+     */
+    fun resolve(shellPidCandidates: Set<Long>, cwd: String?): ResolvedTab? = onEdt {
+        byShellPid(shellPidCandidates)
+            ?: byActiveTab(cwd)
+            ?: byCwd(cwd)
+            ?: bySingleTabProject(cwd)
+            ?: bySelectedTab(cwd)
+    }
+
+    // ===== strategies =====
+
+    /** Exact match: the tab whose shell process appears in the hook's ancestor chain. */
+    private fun byShellPid(candidates: Set<Long>): ResolvedTab? {
+        if (candidates.isEmpty()) return null
+        for (project in ProjectManager.getInstance().openProjects) {
+            for (content in terminalContents(project)) {
+                if (log.isDebugEnabled) dumpContentDiagnostics(content)
+                val pid = extractTabShellPid(content) ?: continue
+                if (pid in candidates) {
+                    log.info("[TWatcher] Matched tab by shell pid $pid: ${content.displayName}")
+                    return ResolvedTab(project, content)
                 }
             }
-            log.info("[TWatcher] getTabNameByShellPid: no match for shell_pid=$shellPid")
-            null
         }
+        log.info("[TWatcher] No tab matched shell pid candidates=$candidates")
+        return null
     }
 
-    fun getTabNameByCwd(cwd: String?): String? {
+    // Reworked Terminal heuristic: a tab running a CLI (claude/codex/gemini) has no
+    // shell broadcasting OSC cwd updates, so getCurrentDirectory() returns null while
+    // idle tabs report a cwd. Exactly one null-cwd tab therefore points at the emitter.
+    private fun byActiveTab(cwd: String?): ResolvedTab? {
         if (cwd.isNullOrBlank()) return null
-        return onEdt {
-            val matches = mutableListOf<String>()
-            for (project in ProjectManager.getInstance().openProjects) {
-                val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("Terminal")
-                    ?: continue
-                for (content in toolWindow.contentManager.contents) {
-                    val tabCwd = extractTabCwd(content)
-                    log.info("[TWatcher] cwd-match: tab='${content.displayName}' tabCwd=$tabCwd hookCwd=$cwd")
-                    if (tabCwd != null && tabCwd == cwd) {
-                        content.displayName?.let { matches.add(it) }
-                    }
-                }
-            }
-            val picked = matches.singleOrNull()
-            if (picked != null) log.info("[TWatcher] Matched tab '$picked' by cwd")
-            picked
-        }
+        val project = findProjectByCwd(cwd) ?: return null
+        val nullCwdTabs = terminalContents(project).filter { extractTabCwd(it) == null }
+        if (nullCwdTabs.size != 1) return null
+        log.info("[TWatcher] Matched tab by active-tab heuristic: ${nullCwdTabs[0].displayName}")
+        return ResolvedTab(project, nullCwdTabs[0])
     }
 
-    // Reworked Terminal 발화원 추정:
-    // CLI(claude/codex/gemini) 가 실행 중인 탭은 shell 이 OSC cwd-broadcast 를 못 보내
-    // `getCurrentDirectory()` 가 null 을 반환하는 패턴이 관찰됨. 다른 idle 탭은 cwd 가 채워져 있음.
-    // 따라서 "프로젝트 내에서 cwd=null 인 탭이 정확히 1개" 면 그 탭을 발화원으로 추정.
-    fun getTabNameByActiveTab(cwd: String?): String? {
+    private fun byCwd(cwd: String?): ResolvedTab? {
         if (cwd.isNullOrBlank()) return null
-        return onEdt {
-            val project = findProjectByCwd(cwd) ?: return@onEdt null
-            val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("Terminal")
-                ?: return@onEdt null
-            val nullCwdTabs = toolWindow.contentManager.contents.filter { extractTabCwd(it) == null }
-            log.info("[TWatcher] active-tab: nullCwdTabs=${nullCwdTabs.map { it.displayName }}")
-            if (nullCwdTabs.size == 1) {
-                val name = nullCwdTabs[0].displayName
-                log.info("[TWatcher] Matched tab '$name' by active-tab heuristic")
-                name
-            } else null
-        }
-    }
-
-    // 최후 fallback — 5421cc6^ 동작 복원.
-    // 정확도 매칭이 모두 실패해도 사용자 포커스 탭의 이름은 항상 표시한다 (잘못된 이름이라도
-    // "이름 자체가 사라지는 회귀" 보다 낫다는 사용자 우선순위).
-    fun getTabNameBySelectedTab(cwd: String?): String? {
-        if (cwd.isNullOrBlank()) return null
-        return onEdt {
-            val project = findProjectByCwd(cwd) ?: return@onEdt null
-            val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("Terminal")
-                ?: return@onEdt null
-            toolWindow.contentManager.selectedContent?.displayName?.also {
-                log.info("[TWatcher] selected-tab-fallback: '$it' (legacy behavior)")
+        val matches = mutableListOf<ResolvedTab>()
+        for (project in ProjectManager.getInstance().openProjects) {
+            for (content in terminalContents(project)) {
+                if (extractTabCwd(content) == cwd) matches.add(ResolvedTab(project, content))
             }
         }
+        val picked = matches.singleOrNull() ?: return null
+        log.info("[TWatcher] Matched tab by cwd: ${picked.content.displayName}")
+        return picked
     }
 
-    fun getTabNameForSingleTabProject(cwd: String?): String? {
+    private fun bySingleTabProject(cwd: String?): ResolvedTab? {
         if (cwd.isNullOrBlank()) return null
-        return onEdt {
-            val project = findProjectByCwd(cwd) ?: return@onEdt null
-            val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("Terminal")
-                ?: return@onEdt null
-            val contents = toolWindow.contentManager.contents
-            if (contents.size == 1) {
-                val name = contents[0].displayName
-                log.info("[TWatcher] single-tab-fallback: project '${project.name}' → '$name'")
-                name
-            } else null
-        }
+        val project = findProjectByCwd(cwd) ?: return null
+        val contents = terminalContents(project)
+        if (contents.size != 1) return null
+        log.info("[TWatcher] single-tab-fallback in ${project.name}: ${contents[0].displayName}")
+        return ResolvedTab(project, contents[0])
+    }
+
+    // Last resort. Even a possibly-wrong tab name beats the name disappearing
+    // entirely, per the priority set when this fallback was first added.
+    private fun bySelectedTab(cwd: String?): ResolvedTab? {
+        if (cwd.isNullOrBlank()) return null
+        val project = findProjectByCwd(cwd) ?: return null
+        val selected = ToolWindowManager.getInstance(project)
+            .getToolWindow(TERMINAL_TOOL_WINDOW_ID)?.contentManager?.selectedContent ?: return null
+        log.info("[TWatcher] selected-tab-fallback: ${selected.displayName}")
+        return ResolvedTab(project, selected)
     }
 
     internal fun findProjectByCwd(cwd: String): Project? =
@@ -131,6 +118,28 @@ object TerminalTabTracker {
             val bp = p.basePath ?: return@firstOrNull false
             cwd == bp || cwd.startsWith("$bp/")
         }
+
+    // ===== tab inspection =====
+
+    private fun terminalContents(project: Project): List<Content> = runCatching {
+        ToolWindowManager.getInstance(project).getToolWindow(TERMINAL_TOOL_WINDOW_ID)
+            ?.contentManager?.contents?.toList().orEmpty()
+    }.getOrDefault(emptyList())
+
+    /** The PID of the shell process backing this tab, via the classic path first. */
+    private fun extractTabShellPid(content: Content): Long? {
+        val widget = resolveTerminalWidget(content)
+        if (widget != null) {
+            val pid = runCatching {
+                (widget.ttyConnector as? ProcessTtyConnector)?.process?.pid()
+            }.getOrNull()
+            if (pid != null) return pid
+        }
+        // Reworked Terminal exposes no public PID accessor as of 2026.1, so the
+        // session graph is searched reflectively. Failure just falls through.
+        val viewImpl = resolveReworkedView(content) ?: return null
+        return extractReworkedPid(viewImpl)
+    }
 
     private fun <T> onEdt(action: () -> T?): T? {
         val result = AtomicReference<T?>()
@@ -167,14 +176,14 @@ object TerminalTabTracker {
         return null
     }
 
-    // Reworked Terminal: Swing 트리에서 TerminalViewImpl$InnerClass 를 찾아 outer(this$0) 를 반환.
-    // `com.intellij.terminal.frontend.view.impl.TerminalViewImpl` 는 getCurrentDirectory() 를 공식 노출.
+    // Reworked Terminal: find the TerminalViewImpl inner class in the Swing tree and
+    // return its outer instance. TerminalViewImpl officially exposes getCurrentDirectory().
     private fun resolveReworkedView(content: Content): Any? {
         val panel = findByClassNameInTree(content.component) { name ->
-            name.startsWith("com.intellij.terminal.frontend.view.impl.TerminalViewImpl\$")
+            name.startsWith(REWORKED_VIEW_INNER_PREFIX)
         } ?: return null
         return runCatching {
-            val f = panel.javaClass.getDeclaredField("this\$0")
+            val f = panel.javaClass.getDeclaredField(OUTER_INSTANCE_FIELD)
             f.isAccessible = true
             f.get(panel)
         }.getOrNull()
@@ -206,17 +215,14 @@ object TerminalTabTracker {
             if (!cwd.isNullOrBlank()) return cwd
         }
         // 2) Reworked TerminalViewImpl.getCurrentDirectory()
-        val reworked = resolveReworkedView(content)
-        if (reworked != null) {
-            return runCatching {
-                reworked.javaClass.getMethod("getCurrentDirectory").invoke(reworked) as? String
-            }.getOrNull()
-        }
-        return null
+        val reworked = resolveReworkedView(content) ?: return null
+        return runCatching {
+            reworked.javaClass.getMethod("getCurrentDirectory").invoke(reworked) as? String
+        }.getOrNull()
     }
 
-    // Reworked Terminal PID — viewImpl 트리 전체를 재귀 탐색해 Process/PID 발견.
-    // sessionFuture / sessionDeferred / 다른 보유 필드 무관하게 동작.
+    // Reworked Terminal PID: recursive scan of the view graph for a Process or PID,
+    // independent of which field currently holds the session.
     private fun extractReworkedPid(viewImpl: Any): Long? {
         return try {
             searchPidRecursive(viewImpl, 0, mutableSetOf())
@@ -226,17 +232,6 @@ object TerminalTabTracker {
         }
     }
 
-    private fun findFieldByNameContaining(cls: Class<*>, token: String): java.lang.reflect.Field? {
-        var c: Class<*>? = cls
-        while (c != null && c.name != "java.lang.Object") {
-            for (f in c.declaredFields) {
-                if (f.name.contains(token, ignoreCase = true)) return f
-            }
-            c = c.superclass
-        }
-        return null
-    }
-
     private fun searchPidRecursive(obj: Any?, depth: Int, seen: MutableSet<Int>): Long? {
         if (obj == null || depth > 7) return null
         val id = System.identityHashCode(obj)
@@ -244,10 +239,9 @@ object TerminalTabTracker {
         val cls = obj.javaClass
         val clsName = cls.name
 
-        // Process 객체 발견 시 pid() 호출
         if (obj is Process) return runCatching { obj.pid() }.getOrNull()
 
-        // CompletableFuture / CompletableDeferred / Future-like — 결과 객체로 진입
+        // CompletableFuture / CompletableDeferred: descend into the resolved value
         if (clsName == "java.util.concurrent.CompletableFuture" ||
             clsName.endsWith("CompletableDeferred") ||
             clsName.endsWith("CompletableDeferredImpl")
@@ -260,7 +254,7 @@ object TerminalTabTracker {
             return if (resolved != null) searchPidRecursive(resolved, depth + 1, seen) else null
         }
 
-        // 패키지 차단 — Process 와 Future 는 위에서 처리했으므로 일반 java.* 는 스킵
+        // Package cut-off. Process and Future are handled above.
         if (clsName.startsWith("java.") || clsName.startsWith("javax.") ||
             clsName.startsWith("sun.") || clsName.startsWith("com.sun.") ||
             (clsName.startsWith("kotlin.") && !clsName.contains("coroutines"))
@@ -296,25 +290,25 @@ object TerminalTabTracker {
         return null
     }
 
-    // ===== diagnostics =====
+    // ===== diagnostics (debug level only: the reflection dump is expensive) =====
+
     private fun dumpContentDiagnostics(content: Content) {
         val tabName = content.displayName
         try {
             val rootClass = content.component?.javaClass?.name ?: "null"
-            log.info("[TWatcher] diag tab='$tabName' rootComponent=$rootClass")
+            log.debug("[TWatcher] diag tab=$tabName rootComponent=$rootClass")
             val hits = mutableListOf<String>()
             collectTerminalishNames(content.component, 0, hits, 20)
-            if (hits.isNotEmpty()) log.info("[TWatcher] diag tab='$tabName' tree-candidates=$hits")
-            // Reworked View 내부 필드 덤프 — PID 경로 확정용
+            if (hits.isNotEmpty()) log.debug("[TWatcher] diag tab=$tabName tree-candidates=$hits")
             val viewImpl = resolveReworkedView(content)
             if (viewImpl != null) {
-                log.info("[TWatcher] diag tab='$tabName' reworkedView=${viewImpl.javaClass.name}")
+                log.debug("[TWatcher] diag tab=$tabName reworkedView=${viewImpl.javaClass.name}")
                 val fields = mutableListOf<String>()
                 collectRelevantFields(viewImpl, "view", 0, fields, 60, mutableSetOf())
-                if (fields.isNotEmpty()) log.info("[TWatcher] diag tab='$tabName' viewImpl-fields=$fields")
+                if (fields.isNotEmpty()) log.debug("[TWatcher] diag tab=$tabName viewImpl-fields=$fields")
             }
         } catch (t: Throwable) {
-            log.info("[TWatcher] diag tab='$tabName' dump failed: ${t.message}")
+            log.debug("[TWatcher] diag tab=$tabName dump failed: ${t.message}")
         }
     }
 
@@ -325,7 +319,7 @@ object TerminalTabTracker {
         if (lower.contains("terminal") || lower.contains("jediterm") || lower.contains("shell") ||
             lower.contains("rework") || lower.contains("session")
         ) {
-            out.add("d${depth}:${name}")
+            out.add("d$depth:$name")
         }
         if (component is Container) {
             for (i in 0 until component.componentCount) {
@@ -348,8 +342,8 @@ object TerminalTabTracker {
         if (!seen.add(id)) return
         val cls = obj.javaClass
         val clsName = cls.name
-        if (clsName.startsWith("java.") || clsName.startsWith("javax.") || clsName.startsWith("sun.")
-            || clsName.startsWith("kotlin.") || clsName.startsWith("com.sun.")
+        if (clsName.startsWith("java.") || clsName.startsWith("javax.") || clsName.startsWith("sun.") ||
+            clsName.startsWith("kotlin.") || clsName.startsWith("com.sun.")
         ) return
         var c: Class<*>? = cls
         while (c != null && c.name != "java.lang.Object") {
@@ -366,7 +360,7 @@ object TerminalTabTracker {
                     field.isAccessible = true
                     val v = field.get(obj)
                     val vType = v?.javaClass?.name ?: "null"
-                    out.add("$path.${field.name}:${field.type.simpleName}→$vType")
+                    out.add("$path.${field.name}:${field.type.simpleName}=$vType")
                     if (v != null && !vType.startsWith("java.") && !vType.startsWith("javax.") &&
                         !vType.startsWith("kotlin.") && !vType.startsWith("sun.")
                     ) {
@@ -377,4 +371,9 @@ object TerminalTabTracker {
             c = c.superclass
         }
     }
+
+    private const val REWORKED_VIEW_INNER_PREFIX =
+        "com.intellij.terminal.frontend.view.impl.TerminalViewImpl\$"
+
+    private const val OUTER_INSTANCE_FIELD = "this\$0"
 }

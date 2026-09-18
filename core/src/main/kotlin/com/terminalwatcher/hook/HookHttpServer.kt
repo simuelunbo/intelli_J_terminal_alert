@@ -5,11 +5,16 @@ import com.intellij.openapi.application.ApplicationActivationListener
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.wm.IdeFrame
 import com.sun.net.httpserver.HttpServer
 import com.terminalwatcher.dispatch.NotificationDispatcher
 import com.terminalwatcher.notify.NotifierProvider
+import com.terminalwatcher.notify.PendingFocusService
+import com.terminalwatcher.settings.SettingsState
+import com.terminalwatcher.terminal.ShellPidResolver
 import com.terminalwatcher.terminal.TabRegistry
+import com.terminalwatcher.terminal.TerminalFocuser
 import com.terminalwatcher.terminal.TerminalTabTracker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -205,20 +210,39 @@ class HookHttpServer(
                 ?: payload.promptResponse
                 ?: payload.toolName?.let { "Approval requested: $it" }
 
-            // Prefer exact tab match via TabRegistry when tabId came through env.
-            // Falls back to the legacy heuristic chain otherwise — preserving
-            // behavior for terminals opened before plugin init.
+            // Prefer the exact tab match: the injected tabId resolves straight to the
+            // Content that hosts the tab. This covers every terminal the plugin saw
+            // start, including tabs restored on IDE restart.
             val tabRegistry = ApplicationManager.getApplication()
                 .getService(TabRegistry::class.java)
-            val tabNameFromRegistry = tabIdHeader
-                ?.let { tabRegistry?.lookup(it) }
-                ?.contentRef?.get()?.displayName
-            val tabName = tabNameFromRegistry
-                ?: TerminalTabTracker.getTabNameByShellPid(shellPid)
-                ?: TerminalTabTracker.getTabNameByActiveTab(payload.cwd)
-                ?: TerminalTabTracker.getTabNameByCwd(payload.cwd)
-                ?: TerminalTabTracker.getTabNameForSingleTabProject(payload.cwd)
-                ?: TerminalTabTracker.getTabNameBySelectedTab(payload.cwd)
+            val boundContent = tabIdHeader?.let { tabRegistry?.lookup(it) }?.contentRef?.get()
+
+            var resolvedTabId = tabIdHeader
+            var tabName = boundContent?.displayName
+
+            if (boundContent == null) {
+                // No injected id, or it never got bound. Fall back to identifying the
+                // tab from the OS process tree first, then the cwd/selection guesses.
+                // `shell_pid` is the hook script's own PID, so its ancestors are what
+                // actually contain the tab's shell.
+                val chain = ShellPidResolver.resolve(shellPid)
+                val resolved = TerminalTabTracker.resolve(chain.candidates, payload.cwd)
+                if (resolved != null) {
+                    tabName = resolved.content.displayName
+                    // Give the Content an id so focus targeting never has to match on
+                    // a tab title, which is neither unique nor stable.
+                    resolvedTabId = if (tabIdHeader != null && tabRegistry?.lookup(tabIdHeader) != null) {
+                        tabRegistry.bindByTabId(tabIdHeader, resolved.content)
+                        tabIdHeader
+                    } else {
+                        tabRegistry?.registerResolved(
+                            resolved.content,
+                            resolved.project.locationHash,
+                            payload.cwd.orEmpty(),
+                        ) ?: tabIdHeader
+                    }
+                }
+            }
 
             HookEvent(
                 tool = resolvedTool,
@@ -227,7 +251,7 @@ class HookHttpServer(
                 sessionId = payload.sessionId ?: payload.threadId,
                 cwd = payload.cwd,
                 tabName = tabName,
-                tabId = tabIdHeader,
+                tabId = resolvedTabId,
                 projectId = projectIdHeader,
             )
         } catch (e: Exception) {
@@ -242,9 +266,33 @@ class HookHttpServer(
             object : ApplicationActivationListener {
                 override fun applicationActivated(ideFrame: IdeFrame) {
                     NotifierProvider.get().resetBadge()
+                    focusPendingTerminalTab()
                 }
             },
         )
+    }
+
+    /**
+     * macOS/Linux path for "the user clicked the system notification".
+     *
+     * Those platforms give no click callback: macOS delivers NSUserNotification
+     * without a delegate, so the click never reaches Java. Regaining focus shortly
+     * after a banner appeared is the only available signal, and the platform itself
+     * treats activation as "notifications acknowledged" by clearing them there.
+     *
+     * The inference is deliberately narrow: the target is only recorded when a
+     * banner actually appeared, expires quickly, and is used at most once. Windows
+     * is excluded outright because it has the real click event.
+     */
+    private fun focusPendingTerminalTab() {
+        if (SystemInfo.isWindows) return
+        val pendingFocus = PendingFocusService.getInstance()
+        if (!SettingsState.getInstance().state.focusTerminalOnClick) {
+            pendingFocus.clear()
+            return
+        }
+        val target = pendingFocus.consume(ACTIVATION_FOCUS_WINDOW_MS) ?: return
+        TerminalFocuser.focus(target.projectId, target.tabId, target.tabName)
     }
 
     override fun dispose() {
@@ -256,5 +304,13 @@ class HookHttpServer(
     companion object {
         private const val PORTS_DIR = ".terminal-watcher/ports"
         private val FILTERED_NOTIFICATION_TYPES = setOf("idle_prompt", "auth_success")
+
+        /**
+         * How soon after a system notification a return to the IDE still counts as
+         * "came back because of that notification". Short on purpose: this is an
+         * inference, and the only false positive it can produce is an unwanted tab
+         * switch when the user alt-tabs back for an unrelated reason.
+         */
+        private const val ACTIVATION_FOCUS_WINDOW_MS = 30_000L
     }
 }

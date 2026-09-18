@@ -46,6 +46,14 @@ object DslSettingsPanel {
                         }
                     }
                 }
+                row {
+                    checkBox(state.osLabels.focusTerminalLabel).apply {
+                        component.isSelected = state.focusTerminalOnClick
+                        component.addActionListener {
+                            viewModel.onAction(SettingsAction.ToggleFocusTerminal((it.source as JCheckBox).isSelected))
+                        }
+                    }
+                }
             }
 
             group("Sound") {

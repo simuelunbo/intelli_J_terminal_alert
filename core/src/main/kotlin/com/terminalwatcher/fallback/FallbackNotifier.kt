@@ -11,7 +11,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
 import javax.sound.sampled.AudioSystem
 import javax.sound.sampled.LineEvent
 
@@ -38,9 +37,6 @@ class FallbackNotifier(private val scope: CoroutineScope) : Notifier {
         notificationType: NotificationType,
         context: NotificationContext?,
     ) {
-        if (isGloballyThrottled()) return
-        if (isThrottled(message)) return
-
         val state = SettingsState.getInstance().state
         val locTag = Notifier.buildLocationTag(context).trim()
 
@@ -50,6 +46,7 @@ class FallbackNotifier(private val scope: CoroutineScope) : Notifier {
                     .getNotificationGroup(NOTIFICATION_GROUP_ID)
                     .createNotification("$toolName — $subtitle", message, notificationType)
                 if (locTag.isNotBlank()) notification.subtitle = locTag
+                Notifier.attachFocusAction(notification, context)
                 notification.notify(null)
             } catch (e: Exception) {
                 log.warn("[TWatcher] Failed to send IDE notification", e)
@@ -98,27 +95,9 @@ class FallbackNotifier(private val scope: CoroutineScope) : Notifier {
         }
     }
 
-    private fun isGloballyThrottled(): Boolean {
-        val now = System.currentTimeMillis()
-        if (now - lastGlobalNotificationTime < GLOBAL_THROTTLE_MS) return true
-        lastGlobalNotificationTime = now
-        return false
-    }
-
-    private fun isThrottled(key: String): Boolean {
-        val now = System.currentTimeMillis()
-        val lastTime = lastNotificationTimes.put(key, now)
-        return lastTime != null && (now - lastTime) < THROTTLE_WINDOW_MS
-    }
-
     companion object {
-        private const val THROTTLE_WINDOW_MS = 2000L
-        private const val GLOBAL_THROTTLE_MS = 5000L
         private const val NOTIFICATION_GROUP_ID = "Terminal AI Watcher"
 
-        private val lastNotificationTimes = ConcurrentHashMap<String, Long>()
 
-        @Volatile
-        private var lastGlobalNotificationTime = 0L
     }
 }

@@ -8,13 +8,13 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.ui.SystemNotifications
 import com.terminalwatcher.notify.NotificationContext
 import com.terminalwatcher.notify.Notifier
+import com.terminalwatcher.notify.PendingFocusService
 import com.terminalwatcher.settings.SettingsState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
 
 @Service(Service.Level.APP)
 class MacNotifier(private val scope: CoroutineScope) : Notifier {
@@ -38,9 +38,6 @@ class MacNotifier(private val scope: CoroutineScope) : Notifier {
         notificationType: NotificationType,
         context: NotificationContext?,
     ) {
-        if (isGloballyThrottled()) return
-        if (isThrottled(message)) return
-
         val state = SettingsState.getInstance().state
         val locTag = Notifier.buildLocationTag(context).trim()
 
@@ -50,6 +47,7 @@ class MacNotifier(private val scope: CoroutineScope) : Notifier {
                     .getNotificationGroup(NOTIFICATION_GROUP_ID)
                     .createNotification("$toolName — $subtitle", message, notificationType)
                 if (locTag.isNotBlank()) notification.subtitle = locTag
+                Notifier.attachFocusAction(notification, context)
                 notification.notify(null)
             } catch (e: Exception) {
                 log.warn("[TWatcher] Failed to send IDE notification", e)
@@ -58,12 +56,19 @@ class MacNotifier(private val scope: CoroutineScope) : Notifier {
 
         if (state.enableSystemNotification) {
             try {
+                // The platform suppresses system notifications while the IDE is the
+                // foreground app, so this is also the test for "a banner the user can
+                // actually click" — see PendingFocusService.
+                val ideWasInBackground = !ApplicationManager.getApplication().isActive
                 // SystemNotifications.notify(name, title, body) has no subtitle slot,
                 // so the location tag is folded into the body.
                 val sysBody = if (locTag.isNotBlank()) "$locTag $message" else message
                 SystemNotifications.getInstance().notify(
                     SYSTEM_NOTIFICATION_NAME, "$toolName — $subtitle", sysBody,
                 )
+                // macOS delivers NSUserNotification without a delegate, so the click
+                // never reaches us. HookHttpServer infers it from IDE activation.
+                if (ideWasInBackground) PendingFocusService.getInstance().record(context)
             } catch (e: Exception) {
                 log.warn("[TWatcher] Failed to send system notification", e)
             }
@@ -145,28 +150,10 @@ class MacNotifier(private val scope: CoroutineScope) : Notifier {
         }
     }
 
-    private fun isGloballyThrottled(): Boolean {
-        val now = System.currentTimeMillis()
-        if (now - lastGlobalNotificationTime < GLOBAL_THROTTLE_MS) return true
-        lastGlobalNotificationTime = now
-        return false
-    }
-
-    private fun isThrottled(key: String): Boolean {
-        val now = System.currentTimeMillis()
-        val lastTime = lastNotificationTimes.put(key, now)
-        return lastTime != null && (now - lastTime) < THROTTLE_WINDOW_MS
-    }
-
     companion object {
-        private const val THROTTLE_WINDOW_MS = 2000L
-        private const val GLOBAL_THROTTLE_MS = 5000L
         private const val BADGE_FLASH_MS = 500L
         private const val NOTIFICATION_GROUP_ID = "Terminal AI Watcher"
         private const val SYSTEM_NOTIFICATION_NAME = "terminal-ai-watcher"
-        private val lastNotificationTimes = ConcurrentHashMap<String, Long>()
 
-        @Volatile
-        private var lastGlobalNotificationTime = 0L
     }
 }

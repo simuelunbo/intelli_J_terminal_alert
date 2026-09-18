@@ -2,18 +2,22 @@ package com.terminalwatcher.windows
 
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.ui.SystemNotifications
 import com.terminalwatcher.notify.NotificationContext
 import com.terminalwatcher.notify.Notifier
+import com.terminalwatcher.notify.PendingFocusService
 import com.terminalwatcher.settings.SettingsState
+import com.terminalwatcher.terminal.TerminalFocuser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.awt.SystemTray
 import java.awt.Taskbar
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.sound.sampled.AudioSystem
 import javax.sound.sampled.LineEvent
 import javax.sound.sampled.UnsupportedAudioFileException
@@ -53,9 +57,6 @@ class WindowsNotifier(private val scope: CoroutineScope) : Notifier {
         notificationType: NotificationType,
         context: NotificationContext?,
     ) {
-        if (isGloballyThrottled()) return
-        if (isThrottled(message)) return
-
         val state = SettingsState.getInstance().state
         val locTag = Notifier.buildLocationTag(context).trim()
 
@@ -65,6 +66,7 @@ class WindowsNotifier(private val scope: CoroutineScope) : Notifier {
                     .getNotificationGroup(NOTIFICATION_GROUP_ID)
                     .createNotification("$toolName — $subtitle", message, notificationType)
                 if (locTag.isNotBlank()) notification.subtitle = locTag
+                Notifier.attachFocusAction(notification, context)
                 notification.notify(null)
             } catch (e: Exception) {
                 log.warn("[TWatcher] Failed to send IDE notification", e)
@@ -73,10 +75,18 @@ class WindowsNotifier(private val scope: CoroutineScope) : Notifier {
 
         if (state.enableSystemNotification) {
             try {
+                // The platform suppresses system notifications while the IDE is the
+                // foreground app, so this doubles as the test for "a toast the user
+                // can actually click".
+                val ideWasInBackground = !ApplicationManager.getApplication().isActive
                 val sysBody = if (locTag.isNotBlank()) "$locTag $message" else message
                 SystemNotifications.getInstance().notify(
                     SYSTEM_NOTIFICATION_NAME, "$toolName — $subtitle", sysBody,
                 )
+                if (ideWasInBackground) {
+                    PendingFocusService.getInstance().record(context)
+                    attachTrayClickListener()
+                }
             } catch (e: Exception) {
                 log.warn("[TWatcher] Failed to send system notification", e)
             }
@@ -92,9 +102,14 @@ class WindowsNotifier(private val scope: CoroutineScope) : Notifier {
         if (!state.enableSound) return
 
         scope.launch(Dispatchers.IO) {
-            val customPath = state.customSoundPath.orEmpty().trim()
-            val soundPath = customPath.ifBlank { defaultSoundPath(state.soundName.orEmpty()) }
-            if (soundPath.isBlank()) return@launch
+            val soundPath = resolveWindowsSoundPath(
+                state.soundName.orEmpty(), state.customSoundPath.orEmpty(),
+                File(System.getenv("SystemRoot") ?: "C:\\Windows", "Media"),
+            )
+            if (soundPath == null) {
+                log.warn("[TWatcher] No Windows notification sound is available")
+                return@launch
+            }
             playFile(soundPath)
         }
     }
@@ -169,6 +184,44 @@ class WindowsNotifier(private val scope: CoroutineScope) : Notifier {
         }
     }
 
+    /**
+     * Hooks the platform's own tray icon so a click on the Windows toast lands here.
+     *
+     * The platform renders system notifications through `SystemTrayNotifications`,
+     * which is a plain `java.awt.TrayIcon` balloon, and already listens for clicks
+     * on it to bring the last-focused frame forward. Adding a second listener to
+     * the same icon gives an exact click signal with no reflection and no guessing,
+     * and lets the correct project window come forward rather than whichever one
+     * happened to be focused last.
+     *
+     * The icon is created lazily on the first system notification, so this is
+     * called after that notification has gone out. If the icon is not there yet the
+     * flag is released and the next notification retries.
+     */
+    private fun attachTrayClickListener() {
+        if (!trayListenerAttached.compareAndSet(false, true)) return
+        try {
+            if (!SystemTray.isSupported()) return
+            val icons = SystemTray.getSystemTray().trayIcons
+            if (icons.isEmpty()) {
+                trayListenerAttached.set(false)
+                return
+            }
+            icons.forEach { icon ->
+                icon.addActionListener {
+                    val target = PendingFocusService.getInstance().consume(TRAY_CLICK_WINDOW_MS)
+                    if (target != null) {
+                        TerminalFocuser.focus(target.projectId, target.tabId, target.tabName)
+                    }
+                }
+            }
+            log.info("[TWatcher] Tray notification click listener attached (${icons.size} icon(s))")
+        } catch (e: Exception) {
+            trayListenerAttached.set(false)
+            log.warn("[TWatcher] Failed to attach tray click listener", e)
+        }
+    }
+
     private fun requestTaskbarAttention() {
         try {
             if (Taskbar.isTaskbarSupported()) {
@@ -179,38 +232,25 @@ class WindowsNotifier(private val scope: CoroutineScope) : Notifier {
         }
     }
 
-    private fun isGloballyThrottled(): Boolean {
-        val now = System.currentTimeMillis()
-        if (now - lastGlobalNotificationTime < GLOBAL_THROTTLE_MS) return true
-        lastGlobalNotificationTime = now
-        return false
-    }
-
-    private fun isThrottled(key: String): Boolean {
-        val now = System.currentTimeMillis()
-        val lastTime = lastNotificationTimes.put(key, now)
-        return lastTime != null && (now - lastTime) < THROTTLE_WINDOW_MS
-    }
-
     companion object {
-        private const val THROTTLE_WINDOW_MS = 2000L
-        private const val GLOBAL_THROTTLE_MS = 5000L
         private const val NOTIFICATION_GROUP_ID = "Terminal AI Watcher"
         private const val SYSTEM_NOTIFICATION_NAME = "terminal-ai-watcher"
         private const val POWERSHELL_PLAYBACK_TIMEOUT_SECONDS = 3
 
+        /**
+         * How long a toast stays "clickable" for focus purposes. Generous, because
+         * the tray click is an exact signal rather than an inference: a click can
+         * only arrive if the user really clicked that toast.
+         */
+        private const val TRAY_CLICK_WINDOW_MS = 5 * 60 * 1000L
+
+        /** The platform's tray icon is a singleton, so one listener is enough. */
+        private val trayListenerAttached = AtomicBoolean(false)
+
         /** javax.sound.sampled 가 JDK 기본 번들로 직접 디코딩 가능한 확장자. */
         private val JAVA_SOUND_EXTENSIONS = setOf("wav", "aiff", "aif", "au", "snd")
 
-        private val lastNotificationTimes = ConcurrentHashMap<String, Long>()
 
-        @Volatile
-        private var lastGlobalNotificationTime = 0L
 
-        private fun defaultSoundPath(soundName: String): String {
-            if (soundName.isBlank()) return ""
-            val systemRoot = System.getenv("SystemRoot") ?: "C:\\Windows"
-            return "$systemRoot\\Media\\$soundName.wav"
-        }
     }
 }

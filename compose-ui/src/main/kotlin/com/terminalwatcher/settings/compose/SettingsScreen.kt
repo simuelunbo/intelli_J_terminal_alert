@@ -55,6 +55,11 @@ fun SettingsScreen(
             onCheckedChange = { onAction(SettingsAction.ToggleSound(it)) },
         ) { Text("Sound alert") }
 
+        CheckboxRow(
+            checked = uiState.focusTerminalOnClick,
+            onCheckedChange = { onAction(SettingsAction.ToggleFocusTerminal(it)) },
+        ) { Text(uiState.osLabels.focusTerminalLabel) }
+
         Spacer(Modifier.height(12.dp))
 
         // Sound

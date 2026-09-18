@@ -6,9 +6,8 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindowManager
 import com.terminalwatcher.hook.HookHttpServer
-import org.jetbrains.plugins.terminal.startup.MutableShellExecOptions
-import org.jetbrains.plugins.terminal.startup.ShellExecOptionsCustomizer
 import java.util.UUID
+import java.util.function.BiConsumer
 
 /**
  * Injects `INTELLIJ_TERMINAL_WATCHER_*` environment variables into every new
@@ -18,20 +17,17 @@ import java.util.UUID
  *
  * Mirrors cmux's `CMUX_SURFACE_ID` / `CMUX_WORKSPACE_ID` injection pattern.
  *
- * Implements [ShellExecOptionsCustomizer] (2026.1+, sinceBuild 261) — the
- * platform's designated replacement for the deprecated `LocalTerminalCustomizer`,
- * so the plugin carries no deprecated-API references. The interface is still
- * `ApiStatus.Experimental` as of 262; accepted, since it is the only
- * non-deprecated env-injection point and `LocalTerminalDirectRunner` invokes it
- * on the same startup path for both classic and reworked terminals.
+ * The Java [TerminalWatcherEnvCustomizer] contains the experimental terminal API
+ * boundary. This setup only needs a standard callback for setting environment variables.
  */
-class TerminalWatcherEnvCustomizer : ShellExecOptionsCustomizer {
+object TerminalWatcherShellSetup {
 
     private val log = Logger.getInstance(TerminalWatcherEnvCustomizer::class.java)
 
     // The EP contract is @RequiresBackgroundThread, so blocking briefly in
     // awaitReady() below is legal here.
-    override fun customizeExecOptions(project: Project, shellExecOptions: MutableShellExecOptions) {
+    @JvmStatic
+    fun configure(project: Project, setEnvironmentVariable: BiConsumer<String, String>) {
         try {
             val tabId = UUID.randomUUID().toString()
             val projectId = project.locationHash
@@ -47,9 +43,9 @@ class TerminalWatcherEnvCustomizer : ShellExecOptionsCustomizer {
             // experimental EelPath API into our bytecode for no routing benefit.
             val cwd = project.basePath ?: ""
 
-            shellExecOptions.setEnvironmentVariable(ENV_TAB_ID, tabId)
-            shellExecOptions.setEnvironmentVariable(ENV_PROJECT_ID, projectId)
-            if (port > 0) shellExecOptions.setEnvironmentVariable(ENV_PORT, port.toString())
+            setEnvironmentVariable.accept(ENV_TAB_ID, tabId)
+            setEnvironmentVariable.accept(ENV_PROJECT_ID, projectId)
+            if (port > 0) setEnvironmentVariable.accept(ENV_PORT, port.toString())
 
             ApplicationManager.getApplication()
                 .getService(TabRegistry::class.java)
@@ -92,9 +88,7 @@ class TerminalWatcherEnvCustomizer : ShellExecOptionsCustomizer {
         tabRegistry.bindByTabId(tabId, pick)
     }
 
-    companion object {
-        const val ENV_TAB_ID = "INTELLIJ_TERMINAL_WATCHER_TAB_ID"
-        const val ENV_PROJECT_ID = "INTELLIJ_TERMINAL_WATCHER_PROJECT_ID"
-        const val ENV_PORT = "INTELLIJ_TERMINAL_WATCHER_PORT"
-    }
+    private const val ENV_TAB_ID = "INTELLIJ_TERMINAL_WATCHER_TAB_ID"
+    private const val ENV_PROJECT_ID = "INTELLIJ_TERMINAL_WATCHER_PROJECT_ID"
+    private const val ENV_PORT = "INTELLIJ_TERMINAL_WATCHER_PORT"
 }

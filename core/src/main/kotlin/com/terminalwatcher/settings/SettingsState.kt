@@ -20,6 +20,13 @@ class SettingsState : SimplePersistentStateComponent<SettingsState.SettingsData>
         var enableSystemNotification by property(true)
         var enableIdeBalloon by property(true)
         var enableSound by property(true)
+
+        /**
+         * Jump to the terminal tab that raised the alert when the notification is
+         * acted on. Exact on Windows (tray click); inferred from IDE activation on
+         * macOS and Linux, where the OS gives no click callback.
+         */
+        var focusTerminalOnClick by property(true)
         var soundName by string("Glass")
         var customSoundPath by string("")
         var enableClaudeCode by property(true)

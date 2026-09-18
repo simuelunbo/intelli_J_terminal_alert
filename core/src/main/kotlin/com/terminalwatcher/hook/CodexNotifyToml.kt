@@ -68,20 +68,6 @@ internal object CodexNotifyToml {
         }.joinToString("\n")
     }
 
-    /**
-     * Ensures a `[[hooks.PermissionRequest]]` command hook referencing [scriptMarker] exists.
-     * Codex's external `notify` program only fires on agent-turn-complete, so approval prompts
-     * are only observable through this lifecycle hook (the event JSON arrives on stdin). The
-     * block is appended at the end of the file, which keeps foreign hook tables intact; returns
-     * null when a PermissionRequest hook already references [scriptMarker].
-     */
-    fun ensurePermissionRequestHook(content: String, scriptMarker: String, hookBlock: String): String? {
-        val idx = content.indexOf("[[hooks.PermissionRequest")
-        if (idx >= 0 && content.indexOf(scriptMarker, idx) >= 0) return null
-        val head = if (content.isBlank()) "" else content.trimEnd() + "\n\n"
-        return head + hookBlock.trimEnd() + "\n"
-    }
-
     /** Line ranges of `notify = ...` assignments in the root table (before the first `[table]`). */
     private fun findTopLevelNotifyAssignments(lines: List<String>): List<IntRange> {
         val out = mutableListOf<IntRange>()

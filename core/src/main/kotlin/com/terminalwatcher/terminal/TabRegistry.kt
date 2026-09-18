@@ -6,6 +6,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.ui.content.Content
 import java.lang.ref.WeakReference
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -17,6 +18,12 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * Lookup is exact-match on tabId (cmux's surface-id equivalent). Listings
  * scoped by `projectId` (Project.locationHash) support fallback paths.
+ *
+ * Terminals that started before the plugin loaded carry no injected tabId at
+ * all. For those, [TerminalTabTracker] resolves the [Content] by other means and
+ * [registerResolved] mints a synthetic id for it, so every downstream consumer
+ * (notably [TerminalFocuser]) can work off one uniform "tabId to Content" path
+ * and never has to match on a tab title, which is neither stable nor unique.
  */
 @Service(Service.Level.APP)
 class TabRegistry {
@@ -75,6 +82,36 @@ class TabRegistry {
 
     fun lookup(tabId: String): TabEntry? = byTabId[tabId]
 
+    /** Reverse lookup by Content identity — the basis for de-duplicating synthetic entries. */
+    fun findByContent(content: Content): TabEntry? =
+        byTabId.values.firstOrNull { it.contentRef?.get() === content }
+
+    /**
+     * Returns a tabId that resolves to [content], minting a synthetic entry when
+     * the tab has none. Used for terminals opened before the plugin loaded, whose
+     * shells never received the injected env vars.
+     *
+     * The synthetic id is only meaningful inside the IDE: it is never handed back
+     * to the shell, because an already-running process cannot be given new
+     * environment variables. It exists so focus targeting can hold the Content
+     * object itself instead of a tab title.
+     */
+    fun registerResolved(content: Content, projectId: String, cwd: String): String {
+        findByContent(content)?.let { return it.tabId }
+
+        val tabId = RESOLVED_ID_PREFIX + UUID.randomUUID()
+        byTabId[tabId] = TabEntry(
+            tabId = tabId,
+            projectId = projectId,
+            cwd = cwd,
+            createdAt = System.currentTimeMillis(),
+            contentRef = WeakReference(content),
+        )
+        byProjectId.computeIfAbsent(projectId) { ConcurrentHashMap.newKeySet() }.add(tabId)
+        log.info("[TWatcher] Registered resolved tab $tabId for content '${content.displayName}'")
+        return tabId
+    }
+
     fun unbindByContent(content: Content) {
         val tabId = byTabId.values.firstOrNull { it.contentRef?.get() === content }?.tabId
         if (tabId != null) evict(tabId)
@@ -107,5 +144,8 @@ class TabRegistry {
     companion object {
         private const val DEFAULT_BIND_WINDOW_MS = 5_000L
         private const val DEFAULT_STALE_MAX_AGE_MS = 60_000L
+
+        /** Marks ids minted by [registerResolved] rather than injected into a shell. */
+        private const val RESOLVED_ID_PREFIX = "resolved-"
     }
 }

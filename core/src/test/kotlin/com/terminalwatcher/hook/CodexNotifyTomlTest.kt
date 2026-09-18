@@ -40,7 +40,7 @@ class CodexNotifyTomlTest {
     }
 
     @Test
-    fun `empty config gets header and our command`() {
+    fun `빈 설정에는 알림 명령을 한 번 등록한다`() {
         val result = upsertWin("")
         assertNotNull(result)
         val lines = result!!.lines()
@@ -50,26 +50,26 @@ class CodexNotifyTomlTest {
     }
 
     @Test
-    fun `our plain line with marker is left untouched`() {
+    fun `주석이 있는 기존 알림 명령을 보존한다`() {
         assertNull(upsertWin("$winHeader\n$winNotify\n\n$sections"))
     }
 
     @Test
-    fun `our plain line without marker is left untouched`() {
+    fun `주석이 없어도 기존 알림 명령을 보존한다`() {
         // The Codex app drops comments when it rewrites the file; the decision must not
         // depend on the marker comment.
         assertNull(upsertWin("$winNotify\n\n$sections"))
     }
 
     @Test
-    fun `codex wrapper embedding our command is respected, marker or not`() {
+    fun `주석 유무와 무관하게 코덱스 알림 래퍼를 보존한다`() {
         // This exact content used to trigger the duplicate-key corruption.
         assertNull(upsertWin("$codexWrapper\n\n$sections"))
         assertNull(upsertWin("$winHeader\n$codexWrapper\n\n$sections"))
     }
 
     @Test
-    fun `duplicate notify keys are repaired keeping the wrapper`() {
+    fun `중복 알림 키를 복구할 때 래퍼를 남긴다`() {
         // The corrupted state the old regex produced: our plain line prepended above the wrapper.
         val broken = "$winHeader\n$winNotify\n$codexWrapper\n\n$sections"
         val result = upsertWin(broken)
@@ -82,7 +82,7 @@ class CodexNotifyTomlTest {
     }
 
     @Test
-    fun `foreign notify with brackets inside strings is fully replaced`() {
+    fun `문자열 내부에 괄호가 있는 기존 명령도 완전히 교체한다`() {
         val foreign = """notify = [ "C:\\other\\tool.exe", "args: [\"a\",\"b\"]" ]"""
         val result = upsertWin("$foreign\n\n$sections")
         assertNotNull(result)
@@ -93,7 +93,7 @@ class CodexNotifyTomlTest {
     }
 
     @Test
-    fun `multi-line foreign notify array is fully removed`() {
+    fun `여러 줄의 기존 알림 배열을 완전히 교체한다`() {
         val foreign = "notify = [\n  \"C:\\\\other\\\\tool.exe\",\n  \"arg\"\n]"
         val result = upsertWin("$foreign\n\n$sections")
         assertNotNull(result)
@@ -103,7 +103,7 @@ class CodexNotifyTomlTest {
     }
 
     @Test
-    fun `notify inside a table section is not treated as top-level`() {
+    fun `테이블 내부의 알림 키는 최상위 키와 구분한다`() {
         val config = "$sections\n\n[foo]\nnotify = \"section-local\""
         val result = upsertWin(config)
         assertNotNull(result)
@@ -112,7 +112,7 @@ class CodexNotifyTomlTest {
     }
 
     @Test
-    fun `stale terminal watcher comments are removed on rewrite`() {
+    fun `명령 교체 시 오래된 자동 생성 주석을 제거한다`() {
         val stale = "# Terminal Watcher notify v2\n# Added by Terminal AI Watcher plugin\nnotify = [\"C:\\\\old\\\\notify-old.cmd\"]"
         val result = upsertWin("$stale\n\n$sections")
         assertNotNull(result)
@@ -130,13 +130,13 @@ class CodexNotifyTomlTest {
         CodexNotifyToml.upsertNotify(content, "notify-twatcher", unixHeader, unixNotify)
 
     @Test
-    fun `unix array form already configured is left untouched`() {
+    fun `유닉스 배열 형식의 기존 알림 명령을 보존한다`() {
         assertNull(upsertUnix("$unixHeader\n$unixNotify\n\n$sections"))
         assertNull(upsertUnix("$unixNotify\n\n$sections"))
     }
 
     @Test
-    fun `unix legacy string form is upgraded to the array form`() {
+    fun `유닉스의 오래된 문자열 형식을 배열로 전환한다`() {
         val legacy = "notify = \"/Users/me/.codex/notify-twatcher.sh\""
         val result = upsertUnix("$legacy\n\n$sections")
         assertNotNull(result)
@@ -146,7 +146,7 @@ class CodexNotifyTomlTest {
     }
 
     @Test
-    fun `unix foreign notify is replaced`() {
+    fun `유닉스의 다른 알림 명령을 교체한다`() {
         val result = upsertUnix("notify = [\"/opt/other/hook.sh\"]\n\n$sections")
         assertNotNull(result)
         assertEquals(1, countTopLevelNotify(result!!))
@@ -154,42 +154,4 @@ class CodexNotifyTomlTest {
         assertFalse(result.contains("other/hook.sh"))
     }
 
-    // ── PermissionRequest lifecycle hook block ──
-
-    private val winHookBlock = """
-        [[hooks.PermissionRequest]]
-
-        [[hooks.PermissionRequest.hooks]]
-        type = "command"
-        command = 'powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\beat Lab\.terminal-watcher\notify.ps1" codex'
-        timeout = 5
-        statusMessage = "Terminal Watcher notification"
-    """.trimIndent()
-
-    @Test
-    fun `permission hook is appended after existing config and is idempotent`() {
-        val base = "$winHeader\n$codexWrapper\n\n$sections"
-        val result = CodexNotifyToml.ensurePermissionRequestHook(base, "notify.ps1", winHookBlock)
-        assertNotNull(result)
-        assertTrue(result!!.startsWith("$winHeader\n$codexWrapper"))
-        assertTrue(result.contains(winHookBlock))
-        assertNull(CodexNotifyToml.ensurePermissionRequestHook(result, "notify.ps1", winHookBlock))
-    }
-
-    @Test
-    fun `permission hook block stands alone on an empty config`() {
-        val result = CodexNotifyToml.ensurePermissionRequestHook("", "notify.ps1", winHookBlock)
-        assertEquals(winHookBlock + "\n", result)
-    }
-
-    @Test
-    fun `foreign permission hook is kept and ours added alongside`() {
-        val foreign = "[[hooks.PermissionRequest]]\n\n[[hooks.PermissionRequest.hooks]]\n" +
-            "type = \"command\"\ncommand = \"/opt/guard.sh\""
-        val result = CodexNotifyToml.ensurePermissionRequestHook(foreign, "notify.ps1", winHookBlock)
-        assertNotNull(result)
-        assertTrue(result!!.contains("/opt/guard.sh"))
-        assertTrue(result.contains("notify.ps1"))
-        assertNull(CodexNotifyToml.ensurePermissionRequestHook(result, "notify.ps1", winHookBlock))
-    }
 }

@@ -129,6 +129,7 @@ object HookConfigHelper {
         ignoreUnknownKeys = true
     }
 
+    @Synchronized
     fun setupAllHooks(projectBasePath: String?) {
         // Windows hook이 참조할 PowerShell script를 먼저 생성
         writePsScriptIfWindows()
@@ -140,37 +141,8 @@ object HookConfigHelper {
 
         // 프로젝트별 설정 (프로젝트 스코프 우선)
         if (projectBasePath != null) {
-            setupClaudeHookProject(projectBasePath)
             setupGeminiHookProject(projectBasePath)
         }
-    }
-
-    // ── Claude Hook Entries ──
-
-    private fun buildClaudeNotificationEntry() = buildJsonArray {
-        add(buildJsonObject {
-            put("matcher", "permission_prompt")
-            put("hooks", buildJsonArray {
-                add(buildJsonObject {
-                    put("type", "command")
-                    put("command", hookCmd("claude"))
-                    put("timeout", 5)
-                })
-            })
-        })
-    }
-
-    private fun buildClaudeStopEntry() = buildJsonArray {
-        add(buildJsonObject {
-            put("matcher", "")
-            put("hooks", buildJsonArray {
-                add(buildJsonObject {
-                    put("type", "command")
-                    put("command", hookCmd("claude"))
-                    put("timeout", 5)
-                })
-            })
-        })
     }
 
     // ── Gemini Hook Entry ──
@@ -193,20 +165,17 @@ object HookConfigHelper {
 
     private fun setupClaudeHookGlobal() {
         val configFile = File(System.getProperty("user.home"), ".claude/settings.json")
-        setupJsonHooks(configFile, "Claude (global)") { hooksMap ->
-            hooksMap["Notification"] = buildClaudeNotificationEntry()
-            hooksMap["Stop"] = buildClaudeStopEntry()
-        }
-    }
-
-    // ── Claude: 프로젝트별 (.claude/settings.json) ──
-
-    private fun setupClaudeHookProject(projectBasePath: String) {
-        val configFile = File(projectBasePath, ".claude/settings.json")
-        if (!configFile.parentFile.exists()) configFile.parentFile.mkdirs()
-        setupJsonHooks(configFile, "Claude (project)") { hooksMap ->
-            hooksMap["Notification"] = buildClaudeNotificationEntry()
-            hooksMap["Stop"] = buildClaudeStopEntry()
+        try {
+            val original = if (configFile.exists()) configFile.readText() else null
+            val updated = ensureClaudeHooks(original.orEmpty(), hookCmd("claude"))
+            if (updated != original) {
+                writeHookConfig(configFile, original, updated)
+                log.info("[TWatcher] Claude hooks configured in user settings")
+            } else {
+                log.info("[TWatcher] Claude hooks already configured")
+            }
+        } catch (e: Exception) {
+            log.warn("[TWatcher] Failed to setup Claude hooks; existing settings were preserved", e)
         }
     }
 
@@ -363,23 +332,14 @@ object HookConfigHelper {
                 modified = true
             }
 
-            val hookBlock = """
-                |[[hooks.PermissionRequest]]
-                |
-                |[[hooks.PermissionRequest.hooks]]
-                |type = "command"
-                |command = '${scriptFile.absolutePath}'
-                |timeout = 5
-                |statusMessage = "Terminal Watcher notification"
-            """.trimMargin()
-            val withHook = CodexNotifyToml.ensurePermissionRequestHook(cleanedContent, "notify-twatcher", hookBlock)
-            if (withHook != null) {
-                cleanedContent = withHook
+            val withoutLegacy = setupCodexPermissionHook(codexDir, cleanedContent, scriptFile.absolutePath, "\"${scriptFile.absolutePath}\"")
+            if (withoutLegacy != cleanedContent) {
+                cleanedContent = withoutLegacy
                 modified = true
             }
 
             if (modified) {
-                configFile.writeText(cleanedContent)
+                writeCodexConfig(configFile, content, cleanedContent)
                 log.info("[TWatcher] Codex hooks configured in ${configFile.absolutePath}")
             } else {
                 log.info("[TWatcher] Codex hooks already configured")
@@ -411,23 +371,14 @@ object HookConfigHelper {
                 modified = true
             }
 
-            val hookBlock = """
-                |[[hooks.PermissionRequest]]
-                |
-                |[[hooks.PermissionRequest.hooks]]
-                |type = "command"
-                |command = 'powershell -NoProfile -ExecutionPolicy Bypass -File "${psScriptPath()}" codex'
-                |timeout = 5
-                |statusMessage = "Terminal Watcher notification"
-            """.trimMargin()
-            val withHook = CodexNotifyToml.ensurePermissionRequestHook(cleaned, "notify.ps1", hookBlock)
-            if (withHook != null) {
-                cleaned = withHook
+            val withoutLegacy = setupCodexPermissionHook(codexDir, cleaned, psCmd("codex"), psCmd("codex"))
+            if (withoutLegacy != cleaned) {
+                cleaned = withoutLegacy
                 modified = true
             }
 
             if (modified) {
-                configFile.writeText(cleaned)
+                writeCodexConfig(configFile, content, cleaned)
                 log.info("[TWatcher] Codex (Windows/powershell) hooks configured in ${configFile.absolutePath}")
             } else {
                 log.info("[TWatcher] Codex hooks already configured")
@@ -436,4 +387,41 @@ object HookConfigHelper {
             log.warn("[TWatcher] Failed to setup Codex hooks (Windows)", e)
         }
     }
+
+    private fun setupCodexPermissionHook(codexDir: File, content: String, legacyCommand: String, command: String): String {
+        val cleaned = removeLegacyCodexPermissionHook(content, legacyCommand)
+        // Do not create a second registration when a user has customized an old TOML block.
+        check(!cleaned.lineSequence().any {
+            it.trimStart().startsWith("command") && isTerminalWatcherCodexCommand(
+                it.substringAfter('=', "").trim().removeSurrounding("'").removeSurrounding("\""),
+            )
+        }) { "Customized Terminal Watcher TOML hook needs migration; existing hooks were preserved" }
+        val file = File(codexDir, "hooks.json")
+        val original = if (file.exists()) file.readText() else ""
+        val updated = ensureCodexPermissionHook(original, command)
+        if (updated != original) {
+            writeCodexConfig(file, original, updated)
+            log.info("[TWatcher] Codex permission hook configured in hooks.json; review new hooks in /hooks")
+        }
+        return cleaned
+    }
+
+    private fun writeCodexConfig(file: File, expected: String, content: String) {
+        check((if (file.exists()) file.readText() else "") == expected) {
+            "Codex configuration changed during setup; leaving the newer configuration intact"
+        }
+        if (file.exists()) {
+            val backup = File(file.parentFile, file.name + ".terminal-watcher.bak")
+            if (!backup.exists()) file.copyTo(backup)
+        }
+        val temporary = java.nio.file.Files.createTempFile(file.parentFile.toPath(), "twatcher-", ".tmp")
+        try {
+            java.nio.file.Files.writeString(temporary, content)
+            java.nio.file.Files.move(temporary, file.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        } finally {
+            java.nio.file.Files.deleteIfExists(temporary)
+        }
+    }
+
 }

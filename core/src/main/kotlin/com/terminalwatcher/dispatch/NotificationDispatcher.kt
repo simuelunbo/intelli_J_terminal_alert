@@ -14,6 +14,7 @@ import com.terminalwatcher.terminal.TerminalTabTracker
 object NotificationDispatcher {
 
     private val log = Logger.getInstance(NotificationDispatcher::class.java)
+    private val notificationGate = NotificationGate()
 
     fun dispatchHookEvent(event: HookEvent) {
         val settings = SettingsState.getInstance()
@@ -25,6 +26,11 @@ object NotificationDispatcher {
 
         val toolName = resolveToolName(event.tool)
         if (!settings.isToolEnabled(toolName)) return
+
+        if (!notificationGate.shouldDeliver(event)) {
+            log.info("[TWatcher] Completion notification suppressed: tool=${event.tool}, tab=${event.tabId}")
+            return
+        }
 
         val subtitle = event.eventType.toSubtitle()
         val notificationType = event.eventType.toNotificationType()
@@ -63,7 +69,10 @@ object NotificationDispatcher {
         return NotificationContext(
             projectName = projectName,
             tabName = tabName,
-            projectId = event.projectId,
+            // Prefer the registry's projectId: a tab resolved without env injection
+            // has no projectId header, but its registry entry knows which project
+            // owns it, and focus targeting needs that to raise the right window.
+            projectId = tabEntry?.projectId ?: event.projectId,
             tabId = event.tabId,
         )
     }
