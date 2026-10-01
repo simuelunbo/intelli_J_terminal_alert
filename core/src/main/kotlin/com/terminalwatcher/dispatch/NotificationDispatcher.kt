@@ -64,7 +64,7 @@ object NotificationDispatcher {
         val tabName = tabNameFromRegistry ?: event.tabName
         val projectName = projectFromRegistry?.name
             ?: event.cwd?.let { TerminalTabTracker.findProjectByCwd(it)?.name }
-            ?: event.cwd?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+            ?: event.cwd?.replace('\\', '/')?.trimEnd('/')?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
 
         return NotificationContext(
             projectName = projectName,
@@ -86,12 +86,13 @@ object NotificationDispatcher {
 
     private fun HookEventType.toSubtitle(): String = when (this) {
         HookEventType.PERMISSION -> "Permission Required"
+        HookEventType.QUESTION -> "Question"
         HookEventType.COMPLETE -> "Completed"
         HookEventType.ERROR -> "Error"
     }
 
     private fun HookEventType.toNotificationType(): NotificationType = when (this) {
-        HookEventType.PERMISSION -> NotificationType.WARNING
+        HookEventType.PERMISSION, HookEventType.QUESTION -> NotificationType.WARNING
         HookEventType.COMPLETE -> NotificationType.INFORMATION
         HookEventType.ERROR -> NotificationType.ERROR
     }

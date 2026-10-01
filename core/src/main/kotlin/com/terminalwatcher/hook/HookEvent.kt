@@ -2,9 +2,11 @@ package com.terminalwatcher.hook
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 enum class HookEventType {
     PERMISSION,
+    QUESTION,
     COMPLETE,
     ERROR,
 }
@@ -18,6 +20,7 @@ data class HookEvent(
     val tabName: String? = null,
     val tabId: String? = null,
     val projectId: String? = null,
+    val transcriptPath: String? = null,
 )
 
 /**
@@ -36,7 +39,10 @@ data class HookPayload(
     val cwd: String? = null,
     @SerialName("last_assistant_message") val lastAssistantMessage: String? = null,
     @SerialName("last-assistant-message") val lastAssistantMessageAlt: String? = null,
+    @SerialName("input-messages") val inputMessages: List<String>? = null,
     @SerialName("prompt_response") val promptResponse: String? = null,
     @SerialName("permission_mode") val permissionMode: String? = null,
     @SerialName("tool_name") val toolName: String? = null,
+    @SerialName("tool_input") val toolInput: JsonElement? = null,
+    @SerialName("transcript_path") val transcriptPath: String? = null,
 )

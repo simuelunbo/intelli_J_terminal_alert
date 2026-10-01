@@ -398,10 +398,10 @@ object HookConfigHelper {
         }) { "Customized Terminal Watcher TOML hook needs migration; existing hooks were preserved" }
         val file = File(codexDir, "hooks.json")
         val original = if (file.exists()) file.readText() else ""
-        val updated = ensureCodexPermissionHook(original, command)
+        val updated = ensureCodexQuestionHook(ensureCodexPermissionHook(original, command), command)
         if (updated != original) {
             writeCodexConfig(file, original, updated)
-            log.info("[TWatcher] Codex permission hook configured in hooks.json; review new hooks in /hooks")
+            log.info("[TWatcher] Codex permission and question hooks configured in hooks.json; review new hooks in /hooks")
         }
         return cleaned
     }

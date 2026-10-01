@@ -43,6 +43,37 @@ class CodexPermissionHooksTest {
     }
 
     @Test
+    fun `기존 동기 자체 훅은 명령을 유지한 채 비동기로 한 번만 전환한다`() {
+        val sync = """{"hooks":{"PermissionRequest":[{"matcher":"","hooks":[{"command":${JsonPrimitive(command)},"statusMessage":"Terminal Watcher notification","timeout":5,"type":"command"}]}]}}"""
+        val upgraded = ensureCodexPermissionHook(sync, "replacement")
+        val handler = Json.parseToJsonElement(upgraded).jsonObject["hooks"]!!.jsonObject["PermissionRequest"]!!
+            .jsonArray[0].jsonObject["hooks"]!!.jsonArray.single().jsonObject
+        assertEquals(JsonPrimitive(true), handler["async"])
+        assertEquals(command, handler["command"]!!.jsonPrimitive.content)
+        assertEquals(upgraded, ensureCodexPermissionHook(upgraded, "replacement"))
+    }
+
+    @Test
+    fun `질문 훅은 질문 도구에만 한 번 등록하고 기존 승인 훅과 다른 훅은 그대로 둔다`() {
+        val original = ensureCodexPermissionHook(
+            """{"hooks":{"PostToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"other"}]}]}}""",
+            command,
+        )
+        val withQuestion = ensureCodexQuestionHook(original, command)
+        val hooks = Json.parseToJsonElement(withQuestion).jsonObject["hooks"]!!.jsonObject
+        val before = Json.parseToJsonElement(original).jsonObject["hooks"]!!.jsonObject
+        assertEquals(before["PermissionRequest"], hooks["PermissionRequest"])
+        val postToolUse = hooks["PostToolUse"]!!.jsonArray
+        assertEquals(before["PostToolUse"]!!.jsonArray[0], postToolUse[0])
+        val question = postToolUse[1].jsonObject
+        assertEquals("^request_user_input_async$", question["matcher"]!!.jsonPrimitive.content)
+        val handler = question["hooks"]!!.jsonArray.single().jsonObject
+        assertEquals(command, handler["command"]!!.jsonPrimitive.content)
+        assertEquals(JsonPrimitive(true), handler["async"])
+        assertEquals(withQuestion, ensureCodexQuestionHook(withQuestion, command))
+    }
+
+    @Test
     fun `기존 톰엘 자체 훅만 제거하고 알림 래퍼와 신뢰 기록은 보존한다`() {
         val head = "notify = [\"wrapper\", \"--previous-notify\", \"keep\"]\n\n"
         val trust = "[hooks.state.\"keep\"]\ntrusted_hash = \"hash\"\n"

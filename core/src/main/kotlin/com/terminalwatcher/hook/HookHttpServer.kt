@@ -8,7 +8,7 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.wm.IdeFrame
 import com.sun.net.httpserver.HttpServer
-import com.terminalwatcher.dispatch.NotificationDispatcher
+import com.terminalwatcher.dispatch.CodexApprovalRouter
 import com.terminalwatcher.notify.NotifierProvider
 import com.terminalwatcher.notify.PendingFocusService
 import com.terminalwatcher.settings.SettingsState
@@ -88,7 +88,7 @@ class HookHttpServer(
 
                         val event = parseToHookEvent(body, tool, shellPid, tabIdHeader, projectIdHeader)
                         if (event != null) {
-                            NotificationDispatcher.dispatchHookEvent(event)
+                            CodexApprovalRouter.route(event)
                         }
                         exchange.sendResponseHeaders(200, 0)
                     } else {
@@ -193,22 +193,37 @@ class HookHttpServer(
                 return null
             }
 
+            if (isCodexAutoApprovedPermissionRequest(tool, payload)) {
+                log.info("[TWatcher] Filtered out auto-approved Codex PermissionRequest: ${payload.toolName}")
+                return null
+            }
+
+            if (isCodexTitleGenerationTurn(payload)) {
+                log.info("[TWatcher] Filtered out Codex thread-title generation turn")
+                return null
+            }
+
             val resolvedTool = tool.ifBlank {
                 if (payload.type == "agent-turn-complete") "codex" else "unknown"
             }
 
-            val eventType = when (payload.hookEventName) {
+            val isQuestion = isCodexQuestion(tool, payload)
+            val eventType = if (isQuestion) HookEventType.QUESTION else when (payload.hookEventName) {
                 "Notification", "PermissionRequest" -> HookEventType.PERMISSION
                 "Stop", "AfterAgent", "SessionEnd" -> HookEventType.COMPLETE
                 else -> HookEventType.COMPLETE
             }
 
-            val message = payload.message
-                ?: payload.title
-                ?: payload.lastAssistantMessage
-                ?: payload.lastAssistantMessageAlt
-                ?: payload.promptResponse
-                ?: payload.toolName?.let { "Approval requested: $it" }
+            val message = if (isQuestion) {
+                codexQuestionMessage(payload.toolInput) ?: "Question requested"
+            } else {
+                payload.message
+                    ?: payload.title
+                    ?: payload.lastAssistantMessage
+                    ?: payload.lastAssistantMessageAlt
+                    ?: payload.promptResponse
+                    ?: payload.toolName?.let { "Approval requested: $it" }
+            }
 
             // Prefer the exact tab match: the injected tabId resolves straight to the
             // Content that hosts the tab. This covers every terminal the plugin saw
@@ -253,6 +268,7 @@ class HookHttpServer(
                 tabName = tabName,
                 tabId = resolvedTabId,
                 projectId = projectIdHeader,
+                transcriptPath = payload.transcriptPath,
             )
         } catch (e: Exception) {
             log.warn("[TWatcher] Failed to parse hook event JSON", e)

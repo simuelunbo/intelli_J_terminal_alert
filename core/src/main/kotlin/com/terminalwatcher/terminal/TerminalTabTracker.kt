@@ -116,7 +116,7 @@ object TerminalTabTracker {
     internal fun findProjectByCwd(cwd: String): Project? =
         ProjectManager.getInstance().openProjects.firstOrNull { p ->
             val bp = p.basePath ?: return@firstOrNull false
-            cwd == bp || cwd.startsWith("$bp/")
+            isSameOrUnderPath(cwd, bp)
         }
 
     // ===== tab inspection =====

@@ -9,14 +9,24 @@
         <br/><br/>
         <b>macOS:</b> To receive system notification banners, allow notifications for your
         IDE in System Settings &rarr; Notifications. (In-IDE balloon notifications work without this.)
+        <br/><br/>
+        <b>Codex:</b> Codex asks you to review new or updated hooks before they run. When Codex
+        asks (or in <code>/hooks</code>), approve the "Terminal Watcher notification" hooks once to
+        receive Codex approval and question alerts.
     ]]></description>
 
     <change-notes><![CDATA[
         <h2>1.2.2</h2>
         <ul>
+            <li><b>New:</b> Get notified when Codex asks you a question during a task, with the question shown in the notification.</li>
             <li><b>New:</b> Open the originating terminal tab using the "Go to terminal tab" link in IDE notifications. Clicking a Windows system notification, or returning to the IDE shortly after an alert on macOS and Linux, also switches to the terminal. This behavior can be turned off under Notification Channels.</li>
             <li><b>Improve:</b> More reliable terminal tab names and navigation to the originating project window when several IDE windows are open.</li>
             <li><b>Fix:</b> Removed duplicate Codex approval notification registrations left by earlier automatic setup and restored missing Claude Code approval and completion handlers while preserving other integrations. Consecutive approval requests are no longer suppressed by the notification cooldown.</li>
+            <li><b>Fix:</b> Codex in Full access mode no longer shows approval notifications for requests it approves automatically.</li>
+            <li><b>Improve:</b> With Codex Auto-review, approval notifications appear only when Codex hands the request to you, not for requests the reviewer settles.</li>
+            <li><b>Fix:</b> Codex no longer triggers an extra "Completed" notification when it names a new conversation.</li>
+            <li><b>Fix:</b> On Windows, notifications show the project name instead of a full folder path when the terminal tab cannot be identified.</li>
+            <li><b>Improve:</b> Codex tool calls no longer pause while an approval notification is sent. After updating, approve the "Terminal Watcher notification" hooks once when Codex asks (or in <code>/hooks</code>).</li>
             <li><b>Fix:</b> On Windows, an unavailable notification sound now falls back to an installed Windows sound, including when the saved setting still refers to a macOS sound.</li>
             <li><b>Improve:</b> Updated terminal integration for newer IDE releases, with compatibility verified on Android Studio 2026.1 and IntelliJ IDEA 2026.3 EAP.</li>
         </ul>

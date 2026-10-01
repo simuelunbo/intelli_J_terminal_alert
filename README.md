@@ -19,6 +19,10 @@ IntelliJ Platform plugin that monitors AI CLI tools (Claude Code, Codex, Gemini 
 | **Codex** | notify hook (agent-turn-complete) | PermissionRequest hook in `~/.codex/hooks.json` |
 | **Gemini CLI** | AfterAgent hook | Notification hook |
 
+Codex questions asked mid-task (`request_user_input_async`, opened with Shift+← in the TUI) neither end the turn nor request approval, so they are detected with a `PostToolUse` hook matched to that tool in `~/.codex/hooks.json`.
+
+Codex approval alerts follow who answers the request. Full access (`approval_policy = "never"`) never asks, so its `PermissionRequest` hooks are ignored. With Auto-review (`approvals_reviewer = "auto_review"`, read from the session transcript), the hook fires before the reviewer decides, so the alert waits until the Codex TUI titles the tab `[ ! ] Action Required` — the reviewer handed the request to the user — and is dropped if that does not happen within 120 seconds. This relies on the default TUI terminal title (with its spinner); tabs whose title Codex does not manage are alerted immediately.
+
 ## How It Works
 
 ```
@@ -40,7 +44,7 @@ Claude Code / Codex / Gemini CLI
 1. Download the latest release ZIP
 2. In your IDE: **Settings** → **Plugins** → **⚙️** → **Install Plugin from Disk**
 3. Select the ZIP file and restart the IDE
-4. Hooks are auto-configured on first run. In Codex, review any new hook in `/hooks` before it can run.
+4. Hooks are auto-configured on first run. In Codex, review any new or updated hook in `/hooks` before it can run; approve the "Terminal Watcher notification" hooks to receive Codex approval and question alerts.
 
 Codex permission hooks use `hooks.json`; the plugin migrates its unchanged legacy TOML block and preserves other tools' hooks, trust records, and completion notification wrappers. Configuration backups use the `.terminal-watcher.bak` suffix. Customized legacy blocks are preserved and reported in the IDE log instead of adding a duplicate.
 
